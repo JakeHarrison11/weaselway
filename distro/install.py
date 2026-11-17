@@ -520,7 +520,9 @@ class DebianTrixie(Ubuntu):
         )
         self.apt_get("update")
         self.apt_get("install", "-y", *self.packages(options))
-        self.apt_get("build-dep", "-y", "mesa")
+        # Mesa's current build requirements need backported headers. Selecting
+        # the source alone leaves dependencies pinned to stable's versions.
+        self.apt_get("build-dep", "-y", "-t", "trixie-backports", "mesa")
 
     def enable_source_packages(self, directory: Path = Path("/etc/apt/sources.list.d")) -> None:
         found = False

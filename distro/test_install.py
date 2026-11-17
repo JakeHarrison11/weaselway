@@ -1,9 +1,29 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
-from install import DebianTrixie, InstallError
+from install import DebianTrixie, Desktop, InstallError, Options
+
+
+class DebianPackagesTests(unittest.TestCase):
+    def test_mesa_build_dependencies_use_backports(self) -> None:
+        distro = DebianTrixie()
+        options = Options(Desktop.KDE, False, False, 8, False)
+        with (
+            patch.object(distro, "enable_source_packages"),
+            patch("install.write_root"),
+            patch.object(distro, "apt_get") as apt,
+        ):
+            distro.install_packages(options)
+        self.assertEqual(
+            apt.call_args_list,
+            [
+                call("update"),
+                call("install", "-y", *distro.packages(options)),
+                call("build-dep", "-y", "-t", "trixie-backports", "mesa"),
+            ],
+        )
 
 
 class DebianSourcesTests(unittest.TestCase):

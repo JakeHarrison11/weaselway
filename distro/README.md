@@ -42,7 +42,10 @@ wsl --install Debian
 
 Debian asks for a user name and password on the first start. The password is
 the one for `sudo`. Ensure systemd is enabled in `/etc/wsl.conf` before
-running the installer.
+running the installer. Keep `trixie-backports` enabled in your apt sources:
+Mesa's build dependencies need newer headers than Trixie's stable packages.
+The installer selects backports for Mesa's build dependencies without
+changing the system-wide apt default release.
 
 **Arch Linux**, in PowerShell:
 
