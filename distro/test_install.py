@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import call, patch
 
-from install import DebianTrixie, Desktop, InstallError, Options
+from install import DebianTrixie, Desktop, InstallError, Options, Ubuntu
 
 
 class DebianPackagesTests(unittest.TestCase):
@@ -24,6 +24,27 @@ class DebianPackagesTests(unittest.TestCase):
                 call("build-dep", "-y", "-t", "trixie-backports", "mesa"),
             ],
         )
+
+    def test_selects_rebuilt_winpr_utils_for_freerdp(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            for name in ("freerdp3-dev", "libwinpr-tools3-3", "winpr3-utils", "winpr-utils", "freerdp3-x11"):
+                (work / f"{name}.deb").touch()
+            installed = {"freerdp3-dev": "old", "libwinpr-tools3-3": "old", "winpr3-utils": "old"}
+            with patch("install.output", side_effect=lambda *args: Path(args[2]).stem):
+                selected = Ubuntu.patched_debs("freerdp", installed, work)
+            self.assertEqual(
+                [path.name for path in selected],
+                ["freerdp3-dev.deb", "libwinpr-tools3-3.deb", "winpr-utils.deb", "winpr3-utils.deb"],
+            )
+
+    def test_old_freerdp_build_without_winpr_utils(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            (work / "freerdp3-dev.deb").touch()
+            with patch("install.output", side_effect=lambda *args: Path(args[2]).stem):
+                selected = Ubuntu.patched_debs("freerdp", {"freerdp3-dev": "old"}, work)
+            self.assertEqual([path.name for path in selected], ["freerdp3-dev.deb"])
 
 
 class DebianSourcesTests(unittest.TestCase):

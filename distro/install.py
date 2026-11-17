@@ -472,16 +472,25 @@ class Ubuntu(Distro):
         }
         run("dpkg-buildpackage", "-b", "-uc", "-us", cwd=tree, env=env)
 
-        # Hyprland builds against aquamarine, and its -dev package wants the
-        # library of the same version.
-        def wanted(name: str) -> bool:
-            return name in installed or (package == "aquamarine" and name.endswith("-dev"))
-
-        debs = [deb for deb in sorted(work.glob("*.deb")) if wanted(output("dpkg-deb", "-f", deb, "Package"))]
+        debs = self.patched_debs(package, installed, work)
         if not debs:
             die(f"none of the packages built from {package} is installed")
         self.apt_get("install", "-y", "--allow-downgrades", *[str(deb) for deb in debs])
         self.stamp(package).write_text(f"{target} {patch_digest(patches)}")
+
+    @staticmethod
+    def patched_debs(package: str, installed: Mapping[str, str], work: Path) -> list[Path]:
+        def wanted(name: str) -> bool:
+            return (
+                name in installed
+                # Hyprland needs aquamarine's matching development package.
+                or (package == "aquamarine" and name.endswith("-dev"))
+                # Newer Debian FreeRDP packages depend on this renamed binary
+                # at the exact same version, even if it wasn't installed yet.
+                or (package == "freerdp" and name == "winpr-utils")
+            )
+
+        return [deb for deb in sorted(work.glob("*.deb")) if wanted(output("dpkg-deb", "-f", deb, "Package"))]
 
     def apt_source_package(self, package: str) -> str:
         return package
