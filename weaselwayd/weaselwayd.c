@@ -43,12 +43,14 @@
 #include <xf86drm.h>
 #include <drm_fourcc.h>
 
-#include "dxgdrm_drm.h"
+#include "dxgdrm-outputs.h"
 #include "input.h"
 #include "log.h"
 #include "placeholder.h"
 #include "rdp.h"
 #include "selection.h"
+
+_Static_assert(RDP_MAX_OUTPUTS == DXGDRM_MAX_OUTPUTS, "output limits must match");
 
 #define MAX_IMPORTS 8
 
@@ -66,6 +68,7 @@ struct import {
  * next one. */
 struct readback {
     bool active;
+    bool discard;
     /* The fence behind the copy: an EGL one that has a descriptor to wait on
      * (@fence_fd, watched by @fence_watch), or failing that a GL one that can
      * only be asked. */
@@ -85,6 +88,15 @@ struct readback {
 };
 
 struct weaselwayd {
+    /* One presenter per output, sharing a GL context and an RDP desktop. */
+    struct weaselwayd *outputs;
+    struct rdp_layout layout;
+    struct weaselwayd *cursor_owner;
+    unsigned next_output;
+    bool clear_desktop;
+    guint drm_watch;
+    struct rdp_rect viewport;
+
     GMainLoop *loop;
     int exit_status;
 
@@ -511,9 +523,12 @@ static void
 frame_done(struct weaselwayd *p)
 {
     struct readback *rb = &p->readback;
+    struct rdp_rect dest = rb->rect;
     gint64 done = g_get_monotonic_time();
 
-    rdp_server_end_frame(p->rdp, &rb->frame, &rb->rect);
+    dest.x += p->viewport.x;
+    dest.y += p->viewport.y;
+    rdp_server_end_frame(p->rdp, &rb->frame, &dest);
     p->frames++;
 
     p->stat_frames++;
@@ -728,7 +743,7 @@ readback_poll(struct weaselwayd *p)
 
     /* The screen changed size under the readback; all of the new one is
      * owed already. */
-    if (rb->width != p->width || rb->height != p->height) {
+    if (rb->discard || rb->width != p->width || rb->height != p->height) {
         rdp_server_cancel_frame(p->rdp, &rb->frame);
         return;
     }
@@ -740,6 +755,7 @@ readback_poll(struct weaselwayd *p)
         return;
 
     rb->landed = g_get_monotonic_time();
+    pixels += (size_t)p->viewport.y * stride + (size_t)p->viewport.x * 4;
     if (readback_copy(p, pixels, stride))
         frame_done(p);
     else
@@ -834,15 +850,17 @@ read_cursor(struct weaselwayd *p, const struct drm_dxgdrm_get_frame *frame)
 static void
 update_cursor(struct weaselwayd *p, const struct drm_dxgdrm_get_frame *frame)
 {
+    struct weaselwayd *root = p->outputs;
     int width = (int)frame->cursor_width, height = (int)frame->cursor_height;
     int hot_x = frame->cursor_hot_x, hot_y = frame->cursor_hot_y;
     int x1, y1, x2, y2;
     g_autofree uint8_t *pixels = NULL;
 
     if (!(frame->flags & DXGDRM_FRAME_CURSOR)) {
-        if (p->have_cursor || !p->cursor_sent) {
+        if (root->cursor_owner == p || (!root->cursor_owner && p == root && !p->cursor_sent)) {
             g_debug("cursor hidden");
             rdp_server_set_pointer(p->rdp, NULL, 0, 0, 0, 0, 0);
+            root->cursor_owner = NULL;
         }
         p->have_cursor = false;
         p->cursor_sent = true;
@@ -853,6 +871,7 @@ update_cursor(struct weaselwayd *p, const struct drm_dxgdrm_get_frame *frame)
     p->have_cursor = true;
     p->cursor_sent = true;
     p->cursor_seq = frame->cursor_seq;
+    root->cursor_owner = p;
 
     pixels = frame->cursor_format == DRM_FORMAT_ARGB8888 ? read_cursor(p, frame) : NULL;
     if (!pixels) {
@@ -907,7 +926,11 @@ fetch_frame(struct weaselwayd *p, GError **error)
     }
     p->seq = frame.seq;
 
-    update_cursor(p, &frame);
+    if (p == p->outputs || p->viewport.width > 0) {
+        if (!(frame.flags & DXGDRM_FRAME_OWNED))
+            frame.flags &= ~DXGDRM_FRAME_CURSOR;
+        update_cursor(p, &frame);
+    }
     if (frame.cursor_fd >= 0)
         close(frame.cursor_fd);
 
@@ -1014,24 +1037,106 @@ ack_frame(struct weaselwayd *p)
 /* The client's window has a size and its monitor a refresh rate; ask for a
  * screen of them. The compositor switches to the new mode, and the frames
  * that follow have that size. */
+static gboolean on_drm_ready(gint fd, GIOCondition condition, gpointer data);
+
+static bool
+open_output(struct weaselwayd *root, unsigned index)
+{
+    struct weaselwayd *p = &root[index];
+    struct drm_dxgdrm_bind_output bind = { .index = index };
+    g_autoptr(GError) error = NULL;
+    g_autofd int fd = -1;
+
+    if (p->drm_fd >= 0)
+        return true;
+    fd = open_dxgdrm(&error);
+    if (fd < 0) {
+        g_warning("%s", error->message);
+        return false;
+    }
+    if (drmIoctl(fd, DRM_IOCTL_DXGDRM_BIND_OUTPUT, &bind)) {
+        g_warning("cannot bind dxgdrm output %u (multiple monitors require an updated module): %s",
+                  index + 1, g_strerror(errno));
+        return false;
+    }
+
+    p->outputs = root;
+    p->loop = root->loop;
+    p->rdp = root->rdp;
+    p->display = root->display;
+    p->compute_prog = root->compute_prog;
+    p->compute_origin = root->compute_origin;
+    p->compute_size = root->compute_size;
+    p->compute_pitch = root->compute_pitch;
+    p->compute_bgra = root->compute_bgra;
+    p->read_bgra = root->read_bgra;
+    p->fence_fds = root->fence_fds;
+    p->verbose = root->verbose;
+    p->drm_fd = g_steal_fd(&fd);
+    if (!fetch_frame(p, &error)) {
+        g_warning("%s", error->message);
+        g_clear_fd(&p->drm_fd, NULL);
+        return false;
+    }
+    p->drm_watch = g_unix_fd_add(p->drm_fd, G_IO_IN, on_drm_ready, p);
+    return true;
+}
+
 static void
 apply_size_request(struct weaselwayd *p)
 {
-    struct drm_dxgdrm_set_mode mode = { 0 };
-    int width, height;
+    struct rdp_layout layout;
+    struct drm_dxgdrm_set_outputs request = { 0 };
     uint32_t refresh_mhz;
 
-    if (!rdp_server_take_size_request(p->rdp, &width, &height, &refresh_mhz))
+    if (!rdp_server_take_layout_request(p->rdp, &layout, &refresh_mhz))
         return;
 
-    mode.width = (uint32_t)width;
-    mode.height = (uint32_t)height;
-    /* 0 until the client says, which is dxgdrm's default. A dxgdrm older
-     * than the field ignores it. */
-    mode.refresh_mhz = refresh_mhz;
-    if (drmIoctl(p->drm_fd, DRM_IOCTL_DXGDRM_SET_MODE, &mode))
-        g_warning("cannot set a %dx%d mode at %u mHz: %s", width, height, refresh_mhz,
-                  g_strerror(errno));
+    for (unsigned i = 1; i < layout.count; i++) {
+        if (!open_output(p, i))
+            return;
+    }
+    request.count = layout.count;
+    for (unsigned i = 0; i < layout.count; i++) {
+        request.modes[i].width = layout.outputs[i].width;
+        request.modes[i].height = layout.outputs[i].height;
+        request.modes[i].refresh_mhz = i == 0 ? refresh_mhz : 0;
+    }
+    if (drmIoctl(p->drm_fd, DRM_IOCTL_DXGDRM_SET_OUTPUTS, &request)) {
+        if (layout.count != 1 || (errno != EINVAL && errno != ENOTTY)) {
+            g_warning("cannot set %u dxgdrm output(s): %s", layout.count, g_strerror(errno));
+            return;
+        }
+        struct drm_dxgdrm_set_mode mode = {
+            .width = layout.width, .height = layout.height, .refresh_mhz = refresh_mhz,
+        };
+        if (drmIoctl(p->drm_fd, DRM_IOCTL_DXGDRM_SET_MODE, &mode)) {
+            g_warning("cannot set %dx%d mode: %s", layout.width, layout.height, g_strerror(errno));
+            return;
+        }
+    }
+
+    if (memcmp(&layout, &p->layout, sizeof(layout)) == 0)
+        return;
+    p->clear_desktop = p->layout.count > 1 || layout.count > 1;
+    p->layout = layout;
+    if (p->clear_desktop) {
+        p->cursor_owner = NULL;
+        rdp_server_set_pointer(p->rdp, NULL, 0, 0, 0, 0, 0);
+    }
+    for (unsigned i = 0; i < RDP_MAX_OUTPUTS; i++) {
+        struct weaselwayd *output = &p[i];
+
+        if (output->readback.active)
+            output->readback.discard = true;
+        output->viewport = layout.count > 1 ? layout.outputs[i] : (struct rdp_rect) { 0 };
+        output->placeholder_owed = true;
+        output->cursor_sent = false;
+        if (i >= layout.count)
+            output->pending = false;
+        else if (output->have_frame)
+            add_full_damage(output);
+    }
 }
 
 /*
@@ -1074,8 +1179,12 @@ sync_screen_size(struct weaselwayd *p)
 {
     int width = p->width, height = p->height;
 
-    if (!p->owned)
+    if (p->layout.count > 1 || (!p->owned && p->layout.count == 1)) {
+        width = p->layout.width;
+        height = p->layout.height;
+    } else if (!p->owned) {
         rdp_server_client_size(p->rdp, &width, &height);
+    }
     if (width == p->screen_width && height == p->screen_height)
         return;
 
@@ -1091,13 +1200,12 @@ sync_screen_size(struct weaselwayd *p)
 static void
 present_placeholder(struct weaselwayd *p)
 {
-    struct rdp_rect rect = { 0, 0, p->screen_width, p->screen_height };
+    struct rdp_rect rect = p->outputs->layout.count > 1 ? p->viewport :
+        (struct rdp_rect) { 0, 0, p->screen_width, p->screen_height };
     struct rdp_frame frame;
     uint8_t *pixels;
     size_t stride;
 
-    if (rdp_server_take_full_request(p->rdp))
-        p->placeholder_owed = true;
     if (!p->placeholder_owed || rdp_server_state(p->rdp) != RDP_READY)
         return;
 
@@ -1109,7 +1217,8 @@ present_placeholder(struct weaselwayd *p)
         return;
     }
 
-    placeholder_draw(pixels, stride, rect.width, rect.height, p->owned);
+    placeholder_draw(pixels + (size_t)rect.y * stride + (size_t)rect.x * 4,
+                     stride, rect.width, rect.height, p->owned);
     rdp_server_end_frame(p->rdp, &frame, &rect);
     p->placeholder_owed = false;
     p->placeholder_up = true;
@@ -1130,20 +1239,18 @@ try_present(struct weaselwayd *p)
 {
     struct readback *rb = &p->readback;
     enum rdp_state state = rdp_server_state(p->rdp);
-    struct rdp_rect rect;
+    struct rdp_rect rect, dest;
     uint8_t *pixels;
     size_t stride;
 
     if (rb->active)
         return;
 
-    if (!p->owned || !p->have_frame) {
+    if (!p->owned || !p->have_frame ||
+        (p->viewport.width && (p->width != p->viewport.width || p->height != p->viewport.height))) {
         present_placeholder(p);
         return;
     }
-
-    if (rdp_server_take_full_request(p->rdp))
-        add_full_damage(p);
 
     if (state == RDP_BUSY || state == RDP_CONNECTING || !p->pending)
         return;
@@ -1151,6 +1258,7 @@ try_present(struct weaselwayd *p)
     /* Nobody to show it to. A client that connects gets the whole screen. */
     if (state == RDP_NO_CLIENT) {
         p->pending = false;
+        rb->discard = false;
         return;
     }
 
@@ -1165,7 +1273,10 @@ try_present(struct weaselwayd *p)
         rect.width = w;
     }
 
-    if (!rdp_server_begin_frame(p->rdp, &rect, &rb->frame))
+    dest = rect;
+    dest.x += p->viewport.x;
+    dest.y += p->viewport.y;
+    if (!rdp_server_begin_frame(p->rdp, &dest, &rb->frame))
         return;
 
     p->pending = false;
@@ -1183,7 +1294,8 @@ try_present(struct weaselwayd *p)
 
     rb->issued = rb->landed = rb->started;
     pixels = rdp_server_frame_pixels(p->rdp, &rb->frame, &stride);
-    if (pixels && read_dumb(p, pixels, stride, &rect))
+    if (pixels && read_dumb(p, pixels + (size_t)p->viewport.y * stride +
+                           (size_t)p->viewport.x * 4, stride, &rect))
         frame_done(p);
     else
         frame_failed(p);
@@ -1191,23 +1303,70 @@ try_present(struct weaselwayd *p)
 
 /* What every source of the main loop ends with: something changed, so see
  * what can be done about the screen now. */
+static bool
+clear_desktop(struct weaselwayd *p)
+{
+    struct rdp_rect rect = { 0, 0, p->screen_width, p->screen_height };
+    struct rdp_frame frame;
+    size_t stride;
+    uint8_t *pixels;
+
+    if (!rdp_server_begin_frame(p->rdp, &rect, &frame))
+        return false;
+    pixels = rdp_server_frame_pixels(p->rdp, &frame, &stride);
+    if (!pixels) {
+        rdp_server_cancel_frame(p->rdp, &frame);
+        return false;
+    }
+    for (int y = 0; y < rect.height; y++)
+        memset(pixels + (size_t)y * stride, 0, (size_t)rect.width * 4);
+    rdp_server_end_frame(p->rdp, &frame, &rect);
+    return true;
+}
+
 static void
 pump(struct weaselwayd *p)
 {
+    unsigned count;
+
+    p = p->outputs;
     apply_size_request(p);
     apply_present_timing(p);
     sync_screen_size(p);
-    readback_poll(p);
-    /* Before the readback is issued, which takes a millisecond: the flip
-     * completes on the first vblank after the ack, and the compositor commits
-     * only about that long before it. */
-    ack_frame(p);
-    try_present(p);
+    count = MAX(1U, p->layout.count);
+    if (rdp_server_take_full_request(p->rdp)) {
+        p->clear_desktop |= count > 1;
+        for (unsigned i = 0; i < count; i++) {
+            p[i].placeholder_owed = true;
+            if (p[i].have_frame)
+                add_full_damage(&p[i]);
+        }
+    }
+    for (unsigned i = 0; i < RDP_MAX_OUTPUTS; i++) {
+        readback_poll(&p[i]);
+        if (p[i].drm_fd >= 0)
+            ack_frame(&p[i]);
+    }
+    if (p->clear_desktop) {
+        if (!clear_desktop(p))
+            return;
+        p->clear_desktop = false;
+    }
+    unsigned first = p->next_output % count;
+    for (unsigned n = 0; n < count; n++) {
+        unsigned i = (first + n) % count;
+
+        if (p[i].readback.active || (p[i].have_frame && p[i].pending &&
+            rdp_server_state(p->rdp) == RDP_READY))
+            p->next_output = i + 1;
+        try_present(&p[i]);
+    }
 }
 
 static void
 fail(struct weaselwayd *p, const GError *error)
 {
+    p = p->outputs;
     g_warning("%s", error->message);
     p->exit_status = EXIT_FAILURE;
     g_main_loop_quit(p->loop);
@@ -1220,11 +1379,13 @@ on_drm_ready(gint fd, GIOCondition condition, gpointer data)
     g_autoptr(GError) error = NULL;
 
     if (condition & (G_IO_ERR | G_IO_HUP | G_IO_NVAL)) {
+        p->drm_watch = 0;
         g_set_error_literal(&error, G_IO_ERROR, G_IO_ERROR_CLOSED, "the dxgdrm node went away");
         fail(p, error);
         return G_SOURCE_REMOVE;
     }
     if (!fetch_frame(p, &error)) {
+        p->drm_watch = 0;
         fail(p, error);
         return G_SOURCE_REMOVE;
     }
@@ -1296,11 +1457,16 @@ on_signal(gpointer data)
 int
 main(int argc, char **argv)
 {
-    struct weaselwayd p = { .drm_fd = -1, .placeholder_owed = true };
+    struct weaselwayd outputs[RDP_MAX_OUTPUTS] = { 0 };
+    struct weaselwayd *p = outputs;
+    for (unsigned i = 0; i < RDP_MAX_OUTPUTS; i++)
+        outputs[i].drm_fd = -1;
+    p->outputs = outputs;
+    p->placeholder_owed = true;
     struct rdp_config rdp_config = {
         .vsock_port = 3389,
         .changed = on_rdp_changed,
-        .changed_data = &p,
+        .changed_data = p,
     };
     g_autofree char *shm_dir = NULL;
     gboolean no_input = FALSE, no_clipboard = FALSE, verbose = FALSE;
@@ -1349,7 +1515,7 @@ main(int argc, char **argv)
         shm_dir = g_strdup(env && *env ? env : "/mnt/wslg-shared-memory");
     }
     rdp_config.shm_dir = shm_dir;
-    rdp_config.verbose = p.verbose = verbose;
+    rdp_config.verbose = p->verbose = verbose;
     log_init(verbose);
 
     /* A client that goes away mid-write must not take weaselwayd with it. */
@@ -1360,54 +1526,62 @@ main(int argc, char **argv)
     if (setpriority(PRIO_PROCESS, 0, -11) < 0)
         g_message("running at the normal priority: %s", g_strerror(errno));
 
-    p.drm_fd = open_dxgdrm(&error);
-    if (p.drm_fd < 0 || !init_egl(&p, &error)) {
+    p->drm_fd = open_dxgdrm(&error);
+    if (p->drm_fd < 0 || !init_egl(p, &error)) {
         g_warning("%s", error->message);
         return EXIT_FAILURE;
     }
 
     if (!no_input)
-        p.input = input_new();
+        p->input = input_new();
     if (!no_clipboard)
-        p.selection = selection_new();
+        p->selection = selection_new();
 
-    rdp_config.input = p.input;
-    rdp_config.selection = p.selection;
-    p.rdp = rdp_server_new(&rdp_config, &error);
-    if (!p.rdp) {
+    rdp_config.input = p->input;
+    rdp_config.selection = p->selection;
+    p->rdp = rdp_server_new(&rdp_config, &error);
+    if (!p->rdp) {
         g_warning("%s", error->message);
         return EXIT_FAILURE;
     }
 
     /* The first call is what makes the node poll readable from then on. It
      * returns at once if a compositor is already up. */
-    if (!fetch_frame(&p, &error)) {
+    if (!fetch_frame(p, &error)) {
         g_warning("%s", error->message);
         return EXIT_FAILURE;
     }
-    if (!p.have_frame)
+    if (!p->have_frame)
         g_message("waiting for the compositor's first commit");
-    p.stat_since = g_get_monotonic_time();
-    p.stat_primary_seq = p.primary_seq;
+    p->stat_since = g_get_monotonic_time();
+    p->stat_primary_seq = p->primary_seq;
 
-    p.loop = g_main_loop_new(NULL, FALSE);
-    g_unix_fd_add(p.drm_fd, G_IO_IN, on_drm_ready, &p);
-    g_unix_signal_add(SIGINT, on_signal, &p);
-    g_unix_signal_add(SIGTERM, on_signal, &p);
-    g_timeout_add_seconds(5, on_stats, &p);
-    pump(&p);
+    p->loop = g_main_loop_new(NULL, FALSE);
+    p->drm_watch = g_unix_fd_add(p->drm_fd, G_IO_IN, on_drm_ready, p);
+    g_unix_signal_add(SIGINT, on_signal, p);
+    g_unix_signal_add(SIGTERM, on_signal, p);
+    g_timeout_add_seconds(5, on_stats, p);
+    pump(p);
 
-    g_main_loop_run(p.loop);
+    g_main_loop_run(p->loop);
 
-    if (p.readback.active)
-        readback_disarm(&p);
-    rdp_server_free(p.rdp);
-    selection_free(p.selection);
-    input_free(p.input);
-    for (int i = 0; i < MAX_IMPORTS; i++)
-        destroy_import(&p, &p.imports[i]);
-    g_free(p.dumb_data);
-    g_main_loop_unref(p.loop);
-    g_message("%u frame(s)", p.frames);
-    return p.exit_status;
+    for (unsigned i = 0; i < RDP_MAX_OUTPUTS; i++) {
+        struct weaselwayd *output = &outputs[i];
+
+        g_clear_handle_id(&output->drm_watch, g_source_remove);
+        if (output->readback.active)
+            readback_disarm(output);
+        for (int j = 0; j < MAX_IMPORTS; j++)
+            destroy_import(output, &output->imports[j]);
+        glDeleteBuffers(1, &output->pbo);
+        g_free(output->dumb_data);
+        if (i != 0)
+            g_clear_fd(&output->drm_fd, NULL);
+    }
+    rdp_server_free(p->rdp);
+    selection_free(p->selection);
+    input_free(p->input);
+    g_main_loop_unref(p->loop);
+    g_message("%u frame(s) from the primary output", p->frames);
+    return p->exit_status;
 }

@@ -24,11 +24,11 @@ static struct rdp_server *server;
 static void
 on_changed(void *data)
 {
-    int width, height;
+    struct rdp_layout layout;
     uint32_t refresh_mhz;
 
-    if (rdp_server_take_size_request(server, &width, &height, &refresh_mhz))
-        rdp_server_set_screen_size(server, width, height);
+    if (rdp_server_take_layout_request(server, &layout, &refresh_mhz))
+        rdp_server_set_screen_size(server, layout.width, layout.height);
     rdp_server_state(server);
 }
 

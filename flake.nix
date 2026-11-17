@@ -68,7 +68,7 @@
 
       nixosModules.weaselway = {
         imports = [
-          (import ./nix/module.nix { inherit dxgdrm; })
+          ./nix/module.nix
           (import ./nix/bluetooth.nix { inherit (dxgdrm.inputs) wsl-kernel; })
         ];
         nixpkgs.overlays = [ self.overlays.default ];
@@ -93,7 +93,7 @@
         weaselwayd = wsl.pkgs.weaselwayd;
         # The rest of what cache.nixos.org lacks, for CI to build in jobs of
         # their own before the images.
-        dxgdrm-all = dxgdrm.packages.x86_64-linux.dxgdrm-all;
+        dxgdrm-all = wsl.pkgs.weaselway-dxgdrm;
         gnome-shell = wsl.pkgs.gnome-shell;
         gnome-control-center = wsl.pkgs.gnome-control-center;
         kwin = wsl.pkgs.kdePackages.kwin;

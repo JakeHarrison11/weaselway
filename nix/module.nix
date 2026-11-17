@@ -1,7 +1,5 @@
 # The weaselway session on NixOS-WSL. Needs the NixOS-WSL module and the
 # overlay from ../flake.nix.
-{ dxgdrm }:
-
 {
   config,
   lib,
@@ -11,9 +9,7 @@
 
 let
   cfg = config.weaselway;
-
-  # dxgdrm.ko for every WSL kernel the dxgdrm flake knows, plus its udev rules.
-  dxgdrm-all = dxgdrm.packages.${pkgs.stdenv.hostPlatform.system}.dxgdrm-all;
+  dxgdrm-all = pkgs.weaselway-dxgdrm;
 
   prep-session = pkgs.writeShellApplication {
     name = "weaselway-prep-session";

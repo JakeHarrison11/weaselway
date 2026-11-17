@@ -408,11 +408,17 @@ deviates from the NixOS defaults in two places:
 so any FreeRDP option can be added or overridden for one run.
 
 To show the desktop across multiple Windows monitors, run
-`ww-start-viewer /multimon`. The viewer opens one borderless window on each
-monitor and shows the corresponding part of the Linux desktop. The Linux
-compositor sees this as one display spanning the combined monitor bounds,
-rather than as independently configurable outputs. To use one viewer window,
-pass `/multimon:off`.
+`ww-start-viewer /multimon`. The Linux compositor sees up to four separate
+virtual outputs, and the viewer shows each output on its corresponding Windows
+monitor. In the Linux display settings, match the order and arrangement shown
+in Windows so the pointer moves between displays correctly. Use each virtual
+output's preferred mode without rotation or scaling. The combined width and
+height must each be at most 8192 pixels; use the viewer's `/monitors:` option
+to select a subset if needed. Without `/multimon`, the viewer and compositor
+use one display as before.
+
+This requires the multi-output `dxgdrm` module included in the NixOS build.
+For other distributions, see [Using a different dxgdrm build](distro/README.md#using-a-different-dxgdrm-build).
 
 The viewer lets Windows turn the monitor off and start the screen saver
 (`/sdl-allow-screensaver`). Without that option, SDL keeps the monitor on

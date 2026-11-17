@@ -186,6 +186,24 @@ puts a shortcut on the Windows desktop that does both. The main README
 describes these commands under [Using it](../README.md#using-it). To stop the
 session, run `ww-start-session stop`.
 
+## Using a different dxgdrm build
+
+The installer defaults to the published single-output dxgdrm release. To use
+native multi-monitor mode, build this branch's module package on a machine
+with Nix, then package the files for the WSL kernel you want to use (replace
+`KERNEL` below with the target distro's `uname -r`):
+
+```sh
+nix build .#dxgdrm-all
+tar -chzf dxgdrm-multi-output.tar.gz -C result \
+    "lib/modules/$KERNEL" lib/udev/rules.d/99-dxgdrm.rules
+```
+
+In the WSL distro, pass the trusted archive to `python3 distro/install.py
+--dxgdrm-archive /path/to/dxgdrm-multi-output.tar.gz` along with your usual
+installer options. Run `wsl --shutdown` from Windows to unload the old
+module, then reopen the distro and use `ww-start-viewer /multimon`.
+
 ## Desktops
 
 Debian Trixie's Plasma shares the clipboard with the Windows viewer through

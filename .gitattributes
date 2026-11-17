@@ -1,0 +1,2 @@
+# Kernel patch context begins with a space, including on tab-indented lines.
+nix/dxgdrm-multi-output.patch -whitespace

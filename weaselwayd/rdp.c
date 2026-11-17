@@ -152,7 +152,7 @@ struct peer_context {
      * the main loop. */
     GMutex notes_lock;
     bool disp_requested;
-    int disp_width, disp_height;
+    struct rdp_layout disp_layout;
     bool gfxredir_present_requested;
     const char *gfxredir_caps_error;
     uint64_t gfxredir_acked[N_BUFFERS];
@@ -225,7 +225,7 @@ struct rdp_server {
 
     /* The size the client asked for, and until when the screen may take to
      * get there. */
-    int wanted_width, wanted_height;
+    struct rdp_layout wanted_layout;
     gint64 wanted_deadline;
     bool size_request_pending;
     /* The refresh rate of the client's monitor; 0 until it says. */
@@ -592,9 +592,10 @@ rdp_server_begin_frame(struct rdp_server *server, const struct rdp_rect *rect,
      * hole, which in steady state it nearly always does -- the damage lands
      * in much the same place every frame. */
     if (buffer->is_stale && peer_ctx->last_written >= 0 && peer_ctx->last_written != index &&
-        !rect_contains(rect, &buffer->stale))
+        !rect_contains(rect, &buffer->stale)) {
         copy_between_buffers(peer_ctx, peer_ctx->last_written, index, &buffer->stale);
-    buffer->is_stale = false;
+        buffer->is_stale = false;
+    }
 
     peer_ctx->writing = index;
     frame->generation = server->generation;
@@ -621,8 +622,7 @@ rdp_server_cancel_frame(struct rdp_server *server, const struct rdp_frame *frame
     if (!peer_ctx)
         return;
 
-    /* The buffer was brought up to date and then not written, which leaves it
-     * exactly as up to date as the last written one. */
+    /* A copy skipped because this frame was going to cover it is still owed. */
     peer_ctx->writing = -1;
 }
 
@@ -643,6 +643,7 @@ rdp_server_end_frame(struct rdp_server *server, const struct rdp_frame *frame,
         return;
 
     buffer = &peer_ctx->buffers[frame->index];
+    buffer->is_stale = false;
     peer_ctx->writing = -1;
 
     /* This buffer is now current; every other one is missing this frame. */
@@ -855,14 +856,14 @@ setup_gfxredir(struct peer_context *peer_ctx)
 /* ------------------------------------------------------------------ */
 
 static void
-request_size(struct rdp_server *server, int width, int height)
+request_layout(struct rdp_server *server, const struct rdp_layout *layout)
 {
-    if (width <= 0 || height <= 0)
+    if (layout->width <= 0 || layout->height <= 0)
         return;
 
-    g_message("the client wants %dx%d", width, height);
-    server->wanted_width = width;
-    server->wanted_height = height;
+    g_message("the client wants %u output(s) in a %dx%d desktop",
+              layout->count, layout->width, layout->height);
+    server->wanted_layout = *layout;
     server->wanted_deadline = g_get_monotonic_time() + MS(SIZE_REQUEST_TIMEOUT_MS);
     server->size_request_pending = true;
 }
@@ -872,13 +873,13 @@ static UINT
 disp_monitor_layout(DispServerContext *context, const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *pdu)
 {
     struct peer_context *peer_ctx = context->custom;
-    int width, height;
+    struct rdp_layout layout;
 
     if (pdu->NumMonitors == 0)
         return CHANNEL_RC_OK;
 
-    if (!monitor_layout_extent(pdu, &width, &height)) {
-        g_warning("ignoring unsupported %u-monitor layout (maximum desktop size is %u x %u)",
+    if (!monitor_layout_parse(pdu, &layout)) {
+        g_warning("ignoring unsupported %u-monitor layout (no overlap, at most %d x %d pixels)",
                   pdu->NumMonitors, WEASELWAY_MAX_DESKTOP_DIMENSION,
                   WEASELWAY_MAX_DESKTOP_DIMENSION);
         return CHANNEL_RC_OK;
@@ -886,8 +887,7 @@ disp_monitor_layout(DispServerContext *context, const DISPLAY_CONTROL_MONITOR_LA
 
     g_mutex_lock(&peer_ctx->notes_lock);
     peer_ctx->disp_requested = true;
-    peer_ctx->disp_width = width;
-    peer_ctx->disp_height = height;
+    peer_ctx->disp_layout = layout;
     g_mutex_unlock(&peer_ctx->notes_lock);
     wake(peer_ctx->server);
     return CHANNEL_RC_OK;
@@ -898,19 +898,18 @@ static void
 disp_dispatch(struct peer_context *peer_ctx)
 {
     bool requested;
-    int width, height;
+    struct rdp_layout layout;
 
     g_mutex_lock(&peer_ctx->notes_lock);
     requested = peer_ctx->disp_requested;
     peer_ctx->disp_requested = false;
-    width = peer_ctx->disp_width;
-    height = peer_ctx->disp_height;
+    layout = peer_ctx->disp_layout;
     g_mutex_unlock(&peer_ctx->notes_lock);
 
     /* No DesktopResize from here: that goes out once the screen has the new
      * size, see peer_sync_desktop_size(). */
     if (requested)
-        request_size(peer_ctx->server, width, height);
+        request_layout(peer_ctx->server, &layout);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1025,7 +1024,7 @@ setup_disp(struct peer_context *peer_ctx)
         return;
 
     disp->custom = peer_ctx;
-    disp->MaxNumMonitors = WEASELWAY_MAX_MONITORS;
+    disp->MaxNumMonitors = RDP_MAX_OUTPUTS;
     disp->MaxMonitorAreaFactorA = DISPLAY_CONTROL_MAX_MONITOR_WIDTH;
     disp->MaxMonitorAreaFactorB = DISPLAY_CONTROL_MAX_MONITOR_HEIGHT;
     disp->DispMonitorLayout = disp_monitor_layout;
@@ -1422,9 +1421,12 @@ peer_finish_activation(freerdp_peer *client)
 
     /* The client dictates the size: the screen is asked to take the one it
      * connected with. */
-    request_size(peer_ctx->server,
-                 (int)freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopWidth),
-                 (int)freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopHeight));
+    int width = (int)freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopWidth);
+    int height = (int)freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopHeight);
+    struct rdp_layout layout = {
+        .count = 1, .width = width, .height = height, .outputs = { { 0, 0, width, height } },
+    };
+    request_layout(peer_ctx->server, &layout);
 
     /* Before gfxredir, as Weston does. The first frame goes out once the
      * client has confirmed gfxredir caps. */
@@ -1562,7 +1564,7 @@ peer_sync_desktop_size(struct peer_context *peer_ctx)
     /* The screen is still on its way to the size the client asked for. If
      * it is the client that is on that size already, this is all there is to
      * wait for; if not, the client follows once the screen is there. */
-    if ((width != server->wanted_width || height != server->wanted_height) &&
+    if ((width != server->wanted_layout.width || height != server->wanted_layout.height) &&
         g_get_monotonic_time() < server->wanted_deadline)
         return true;
 
@@ -2148,12 +2150,12 @@ rdp_server_client_size(struct rdp_server *server, int *width, int *height)
 {
     struct peer_context *peer_ctx = server->peer;
 
-    if (!peer_ctx || !peer_ctx->activated || peer_ctx->failed || server->wanted_width <= 0 ||
-        server->wanted_height <= 0)
+    if (!peer_ctx || !peer_ctx->activated || peer_ctx->failed || server->wanted_layout.width <= 0 ||
+        server->wanted_layout.height <= 0)
         return false;
 
-    *width = server->wanted_width;
-    *height = server->wanted_height;
+    *width = server->wanted_layout.width;
+    *height = server->wanted_layout.height;
     return true;
 }
 
@@ -2176,17 +2178,15 @@ rdp_server_state(struct rdp_server *server)
 }
 
 bool
-rdp_server_take_size_request(struct rdp_server *server, int *width, int *height,
-                             uint32_t *refresh_mhz)
+rdp_server_take_layout_request(struct rdp_server *server, struct rdp_layout *layout,
+                               uint32_t *refresh_mhz)
 {
     /* A refresh rate can come before the size; it waits for it. */
-    bool requested = server->size_request_pending && server->wanted_width > 0 &&
-                     server->wanted_height > 0;
+    bool requested = server->size_request_pending && server->wanted_layout.count > 0;
 
     if (requested)
         server->size_request_pending = false;
-    *width = server->wanted_width;
-    *height = server->wanted_height;
+    *layout = server->wanted_layout;
     *refresh_mhz = server->wanted_refresh_mhz;
     return requested;
 }

@@ -45,6 +45,13 @@ struct rdp_rect {
     int x, y, width, height;
 };
 
+#define RDP_MAX_OUTPUTS 4
+struct rdp_layout {
+    unsigned count;
+    int width, height;
+    struct rdp_rect outputs[RDP_MAX_OUTPUTS];
+};
+
 /* Grow @into to the bounding box of itself and @rect. */
 void rdp_rect_union(struct rdp_rect *into, const struct rdp_rect *rect);
 
@@ -81,8 +88,8 @@ void rdp_server_set_screen_size(struct rdp_server *server, int width, int height
  * after that is resized to the screen instead. Also true when only the
  * refresh rate of the client's monitor changed; @refresh_mhz is 0 until the
  * client has said. */
-bool rdp_server_take_size_request(struct rdp_server *server, int *width, int *height,
-                                  uint32_t *refresh_mhz);
+bool rdp_server_take_layout_request(struct rdp_server *server, struct rdp_layout *layout,
+                                    uint32_t *refresh_mhz);
 
 /* True, once, when the client has said where the last @frames frames were
  * ready relative to its monitor's vblank: @slack_us before it, the 10th

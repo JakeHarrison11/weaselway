@@ -19,7 +19,7 @@ SOURCES := weaselwayd.c rdp.c monitor-layout.c input.c audio.c clipboard.c forma
 # gfxredir/README.md. Upstream code, so it is spared our warnings.
 GFXREDIR := gfxredir/gfxredir_server.c gfxredir/gfxredir_common.c
 HEADERS := rdp.h monitor-layout.h input.h audio.h clipboard.h selection.h selection-backends.h formats.h \
-           placeholder.h log.h $(CONTROL_HEADERS) $(wildcard gfxredir/*.h)
+           placeholder.h log.h dxgdrm-outputs.h $(CONTROL_HEADERS) $(wildcard gfxredir/*.h)
 OBJECTS := $(SOURCES:.c=.o) $(GFXREDIR:.c=.o)
 
 # The clipboard protocol of KWin and the wlroots compositors.

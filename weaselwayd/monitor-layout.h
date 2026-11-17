@@ -6,11 +6,11 @@
 
 #include <freerdp/channels/disp.h>
 
-#define WEASELWAY_MAX_MONITORS 16
+#include "rdp.h"
+
 #define WEASELWAY_MAX_DESKTOP_DIMENSION 8192
 
-/* Find the desktop bounds that contain every monitor in a layout. */
-bool monitor_layout_extent(const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *layout, int *width,
-                           int *height);
+/* Keep the primary output first; normalize the rectangles to the desktop origin. */
+bool monitor_layout_parse(const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *pdu, struct rdp_layout *layout);
 
 #endif

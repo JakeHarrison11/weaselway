@@ -28,10 +28,10 @@ flowchart TD
 ```
 
 The compositor runs on its regular KMS (kernel mode setting, the Linux interface for driving
-displays) backend and has no knowledge of Windows. dxgdrm is a kernel module that presents a virtual
-display: one CRTC (the display controller that scans a buffer out), a primary plane with
-`FB_DAMAGE_CLIPS` (the changed rectangles of each frame), a cursor plane with a hotspot, and one
-connector.
+displays) backend and has no knowledge of Windows. dxgdrm presents up to four virtual outputs,
+each with a connector, a CRTC (the display controller that scans out a buffer), a primary plane
+with `FB_DAMAGE_CLIPS` (the changed rectangles of each frame), and a cursor plane with a hotspot.
+Only the first output is connected by default.
 
 The scanout buffers are D3D12 textures. weaselwayd waits for a commit on the dxgdrm node and imports
 the buffer into its own GL context (mesa d3d12). It reads the damaged region back into a pixel
@@ -57,9 +57,12 @@ channel, `Weaselway::Display`, on which it reports two things about the monitor 
   keep this at about 3 ms ([0031](docs/adr/0031-vblank-phase-from-the-viewer.md)).
 
 With `/multimon`, the viewer sends Windows monitor positions and sizes over RDP's display control
-channel and opens one window per monitor. weaselwayd resizes the single dxgdrm display to the
-bounding rectangle of that layout, so the compositor presents one desktop across the monitors. The
-combined width and height must each fit dxgdrm's 8192-pixel limit.
+channel and opens one window per monitor. weaselwayd configures one dxgdrm connector per monitor
+and binds a render-node descriptor to each scanout. Flip acknowledgments and damage are tracked
+per output. Each scanout updates its own rectangle in the shared RDP desktop; the desktop is
+limited to 8192 pixels on either axis. The compositor chooses the Linux layout; match it to
+Windows for absolute pointer coordinates. Refresh and present timing feedback apply to the first
+output only.
 
 While no compositor owns the display, the client gets a screen with "No compositor running". While
 the compositor has the display off, it gets "Screen is off"
@@ -90,7 +93,7 @@ The NixOS image takes everything from the flake.
 | Component | Source | Where it runs |
 |---|---|---|
 | mesa with the d3d12 changes | `weaselway/mesa`, branch `mesa-26.2.7-wsl` | user distro (`/run/opengl-driver`) |
-| dxgdrm kernel module | `weaselway/dxgdrm` flake | user distro kernel, loaded from the store |
+| dxgdrm kernel module | `weaselway/dxgdrm` flake with [multi-output patch](nix/dxgdrm-multi-output.patch) | user distro kernel, loaded from the store |
 | weaselwayd | [weaselwayd/](weaselwayd) in this repo | user distro, as a unit of the user manager |
 | mutter | nixpkgs, plus [one patch](nix/mutter-stage-relayout.patch) | user distro (gnome-shell links it) |
 | KWin (optional) | nixpkgs, plus a damage patch per release | user distro |
