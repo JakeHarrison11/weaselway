@@ -4,7 +4,7 @@
  * one whose compositor answers.
  *
  *   mutter_   mutter's D-Bus interface for remote desktops (selection-mutter.c)
- *   wayland_  ext-data-control-v1, which KWin and the wlroots compositors
+ *   wayland_  ext-data-control-v1 or wlr-data-control, which KWin and the wlroots compositors
  *             implement (selection-wayland.c)
  *
  * A read takes a GTask of selection_read_async() and returns it.

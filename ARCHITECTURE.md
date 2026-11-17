@@ -67,7 +67,8 @@ its compositor:
 - With mutter, it uses the D-Bus interface that gnome-remote-desktop uses
   (`org.gnome.Mutter.RemoteDesktop`). It creates a session object with the clipboard enabled and
   never starts it, so gnome-shell shows no screen-sharing indicator.
-- With KWin and the wlroots compositors, it is a Wayland client with `ext-data-control-v1`. It
+- With KWin and the wlroots compositors, it is a Wayland client with `ext-data-control-v1`
+  or the older `wlr-data-control` protocol (used by KWin 6.3). It
   watches `$XDG_RUNTIME_DIR` for `wayland-*` sockets and connects to the first compositor that
   offers the protocol. mutter does not offer it and is left alone.
 
@@ -552,7 +553,7 @@ from pkg-config, and `wayland-scanner`. `nix develop` provides all of these.
   mutter as the session, and `tests/rdp-harness` is weaselwayd's RDP server and clipboard without
   the screen. `CLIPBOARD_TEST_COMPOSITOR=kwin` runs a virtual KWin instead of mutter.
 - [tests/selection-mutter.sh](weaselwayd/tests/selection-mutter.sh) tests the mutter side alone.
-- [tests/selection-kwin.sh](weaselwayd/tests/selection-kwin.sh) tests the `ext-data-control-v1`
+- [tests/selection-kwin.sh](weaselwayd/tests/selection-kwin.sh) tests the Wayland data-control
   side alone against KWin, with `wl-copy` and `wl-paste` as the other clients. It also restarts
   KWin to check that weaselwayd finds the new one.
 - [tests/egl-load.c](weaselwayd/tests/egl-load.c) (`make tests/egl-load`) is a fullscreen EGL
@@ -662,8 +663,8 @@ clipboard"), and through which backend.
   closes the session object when the screen is locked. weaselwayd requests a new one every three
   seconds until it succeeds.
 - With KWin, the message names the socket. `G_MESSAGES_DEBUG=clipboard` also logs the sockets that
-  were skipped because their compositor lacks `ext-data-control-v1`, and `WAYLAND_DEBUG=client` on
-  weaselwayd shows the protocol traffic.
+  were skipped because their compositor lacks a supported data-control protocol.
+  `WAYLAND_DEBUG=client` on weaselwayd shows the protocol traffic.
 
 `ww-start-viewer /sdl-show-stats:2` and `/sdl-show-damage` show the client's view of the same data.
 The statistics overlay also shows the busy and wait time of each upload, for the GPU and the CPU
@@ -718,7 +719,8 @@ when working on the code.
 - Two features of the RDP backend that mutter used to carry have not been ported: the client's
   scale factor, and the error frame (a client is disconnected instead, with the reason in the log).
   There is no touchscreen device, only the touchpad.
-- The clipboard does not carry files, and needs mutter or a compositor with `ext-data-control-v1`.
+- The clipboard does not carry files, and needs mutter or a compositor with `ext-data-control-v1`
+  or `wlr-data-control`.
   - A client that connects with text or an image on its clipboard replaces the session's clipboard
     content.
   - weaselwayd decides whether the clipboard is its own by whether its data source was cancelled.
