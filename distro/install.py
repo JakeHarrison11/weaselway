@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Install weaselway into Ubuntu, Debian Trixie KDE, or Arch Linux (and CachyOS) WSL.
 
-The desktop (GNOME, Plasma or Hyprland) and PipeWire come from the distro.
-Where available, weaselway's patches are built into the compositor packages;
-Debian Trixie's KDE uses stock KWin. The patched Mesa and weaselwayd are
-compiled here; the dxgdrm module, the Windows viewer and the Bluetooth
-modules come from GitHub releases. See distro/README.md.
+The desktop (GNOME, Plasma or Hyprland) and PipeWire come from the distro,
+with weaselway's patches built into the compositor packages. The patched Mesa
+and weaselwayd are compiled here; the dxgdrm module, the Windows viewer and the
+Bluetooth modules come from GitHub releases. See distro/README.md.
 
 Run it from a checkout of this repository, as your user; it uses sudo where
 needed. Options that are not given on the command line are asked for.
@@ -255,6 +254,7 @@ BACKPORTS: Final[Mapping[str, Sequence[Backport]]] = {
     # KWin reports its damage (FB_DAMAGE_CLIPS), so weaselwayd does not read back
     # the whole screen every frame.
     "kwin": [
+        Backport((6, 3), (6, 4), ("kwin-6.3-fb-damage-clips.patch",)),
         Backport((6, 6), (6, 7), ("kwin-6.6-fb-damage-clips.patch",)),
         Backport((6, 7), (6, 8), ("kwin-6.7-fb-damage-clips.patch",)),
         Backport((6, 8), (6, 9), ("kwin-6.8-fb-damage-clips.patch",)),
@@ -286,6 +286,11 @@ def backport_patches(package: str, version: str) -> list[Path]:
 
     >>> [p.name for p in backport_patches("kwin", "4:6.6.6-0ubuntu0.1")]
     ['kwin-6.6-fb-damage-clips.patch']
+    >>> [p.name for p in backport_patches("kwin", "4:6.3.6-1")]
+    ['kwin-6.3-fb-damage-clips.patch']
+    >>> backport_patches("kwin", "6.4.0")  # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+    InstallError: weaselway has no patch for kwin 6.4.0 yet
     >>> [p.name for p in backport_patches("aquamarine", "0.16.0")]
     ['aquamarine-0.11-mode-changes.patch']
     >>> backport_patches("kwin", "6.9.0")  # doctest: +IGNORE_EXCEPTION_DETAIL
@@ -345,6 +350,11 @@ class Distro(ABC):
         return packages
 
     def patched_packages(self, options: Options) -> list[str]:
+        """Packages rebuilt for this selection.
+
+        >>> DebianTrixie().patched_packages(Options(Desktop.KDE, False, False, 1, False))
+        ['freerdp', 'kwin']
+        """
         packages = ["freerdp"] if self.freerdp_uses_ffmpeg else []
         return packages + list(COMPOSITOR_PACKAGES[options.desktop])
 
@@ -496,19 +506,7 @@ class DebianTrixie(Ubuntu):
         if options.desktop is not Desktop.KDE:
             die("Debian Trixie is currently supported with KDE only")
 
-        sources = Path("/etc/apt/sources.list.d/debian.sources")
-        if not sources.is_file():
-            die(f"cannot enable source packages: {sources} does not exist")
-        content = sources.read_text()
-        updated = re.sub(
-            r"(?m)^Types:\s*((?:deb\s*)+)$",
-            lambda match: f"Types: {match.group(1).strip()} deb-src",
-            content,
-        )
-        if updated == content and not re.search(r"(?m)^Types:.*\bdeb-src\b", content):
-            die(f"cannot enable source packages in {sources}")
-        if updated != content:
-            write_root(sources, updated)
+        self.enable_source_packages()
 
         blocked = [
             package
@@ -524,16 +522,21 @@ class DebianTrixie(Ubuntu):
         self.apt_get("install", "-y", *self.packages(options))
         self.apt_get("build-dep", "-y", "mesa")
 
-    def patched_packages(self, options: Options) -> list[str]:
-        # Trixie's KWin 6.3 is older than the first release with a compatible
-        # FB_DAMAGE_CLIPS backport. The stock compositor works, but redraws
-        # the full output each frame.
-        print(
-            "warning: Debian Trixie's KWin is installed without weaselway's "
-            "FB_DAMAGE_CLIPS patch; full-frame redraws may reduce performance",
-            file=sys.stderr,
-        )
-        return ["freerdp"] if self.freerdp_uses_ffmpeg else []
+    def enable_source_packages(self, directory: Path = Path("/etc/apt/sources.list.d")) -> None:
+        found = False
+        for sources in sorted(directory.glob("*.sources")):
+            content = sources.read_text()
+            updated = re.sub(
+                r"(?m)^(Types:[ \t]+)deb[ \t]*$",
+                r"\1deb deb-src",
+                content,
+            )
+            if re.search(r"(?m)^Types:[ \t]+[^\n]*\bdeb-src\b", updated):
+                found = True
+            if updated != content:
+                write_root(sources, updated)
+        if not found:
+            die(f"cannot enable source packages: no deb or deb-src entries in {directory}/*.sources")
 
 
 class Arch(Distro):

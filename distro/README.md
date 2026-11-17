@@ -8,12 +8,10 @@ weaselway in a distro they already know, and who can wait for Mesa and the
 compositor to compile.
 
 [install.py](install.py) does all of the work. It takes the desktop and
-PipeWire (the audio server) from the distro and rebuilds supported compositor
-packages with weaselway's patches. It compiles the patched Mesa and
-weaselwayd, and downloads the dxgdrm kernel module and the Windows viewer
-from GitHub releases. Debian Trixie's KWin remains stock because its version
-is too old for the current backport. The steps below explain what to run
-before and after it.
+PipeWire (the audio server) from the distro and rebuilds the compositor
+package with weaselway's patches. It compiles the patched Mesa and weaselwayd,
+and downloads the dxgdrm kernel module and the Windows viewer from GitHub
+releases. The steps below explain what to run before and after it.
 
 ## Requirements
 
@@ -130,6 +128,9 @@ The script changes the system in these places:
 - It rebuilds the compositor package with weaselway's patches, see
   [Patched packages](#patched-packages). On Debian and Arch it also rebuilds
   FreeRDP.
+- On Debian it enables source packages (`deb-src`) in the configured
+  `/etc/apt/sources.list.d/*.sources` files, including `0000debian.sources`,
+  for the build dependencies.
 - It installs Mesa to `/opt/weaselway/mesa` and puts that directory ahead of
   the distro's libraries with `/etc/ld.so.conf.d/00-weaselway-mesa.conf`. The
   distro's Mesa packages stay installed but are no longer used.
@@ -209,9 +210,7 @@ distro's packages, with the patches from [nix/](../nix):
 - KWin (Plasma): the FB_DAMAGE_CLIPS backport for the KWin release. Without it
   KWin reports the whole screen as changed in every frame, and weaselwayd
   reads back all of it (`100% of the screen each` in the statistics line in
-  `journalctl --user -u weaselwayd -f`). Debian Trixie's KWin 6.3 is too old
-  for the available backport, so it remains unpatched; Plasma works, but KWin
-  redraws the full output each frame and may be slower.
+  `journalctl --user -u weaselwayd -f`).
 - aquamarine and Hyprland: the backports that let Hyprland follow the size of
   the viewer's window.
 - FreeRDP, on Debian and Arch: `freerdp-dsp-ffmpeg-pcm-s16.patch`. Their
