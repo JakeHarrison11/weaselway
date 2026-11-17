@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# The ext-data-control-v1 side of the selection against a real KWin, without a
+# The Wayland data-control side of the selection against a real KWin, without a
 # desktop: a virtual KWin on a runtime directory of its own, selection-tool on
 # one side and wl-copy/wl-paste on the other.
 #
 # Needs kwin_wayland, wl-clipboard, dbus-run-session and a built
 # tests/selection-tool:
 #   make tests/selection-tool && tests/selection-kwin.sh
+# For KWin 6.3, set EXPECTED_DATA_CONTROL=wlr-data-control-unstable-v1.
 set -euo pipefail
 
 tool=$(dirname "$(readlink -f "$0")")/selection-tool
@@ -53,6 +54,10 @@ for _ in $(seq 100); do
     sleep 0.1
 done
 [ "$got" = "$text" ] || fail "wl-paste read '$got', wanted '$text'"
+if [ -n "${EXPECTED_DATA_CONTROL:-}" ]; then
+    grep -Fq "sharing the session's clipboard ($EXPECTED_DATA_CONTROL on wayland-test)" "$log.offer" ||
+        fail "we did not bind $EXPECTED_DATA_CONTROL"
+fi
 grep -q '^requested: text/plain;charset=utf-8' "$log.offer" || fail "the owner was not asked"
 # The owner is told that the clipboard is its own, and nothing else.
 if grep -q '^owner: \[..*\]' "$log.offer"; then

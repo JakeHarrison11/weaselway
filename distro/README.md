@@ -188,6 +188,10 @@ session, run `ww-start-session stop`.
 
 ## Desktops
 
+Debian Trixie's Plasma shares the clipboard with the Windows viewer through
+KWin's older `wlr-data-control` protocol. On an existing install, pull the
+latest changes and rerun the installer to update `weaselwayd`.
+
 **GNOME** has no lock screen here: gnome-shell only locks when GDM runs, and
 the script keeps GDM out. Lock Windows instead.
 

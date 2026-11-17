@@ -5,7 +5,7 @@
  * There is no Wayland protocol for this that every compositor has. mutter is
  * reached over the D-Bus interface that gnome-remote-desktop uses
  * (org.gnome.Mutter.RemoteDesktop), KWin and the wlroots compositors through
- * ext-data-control-v1; see selection-backends.h. Without a compositor that
+ * ext-data-control-v1 or wlr-data-control; see selection-backends.h. Without a compositor that
  * answers, nothing is offered and nothing can be read, and that changes as
  * soon as one shows up.
  *

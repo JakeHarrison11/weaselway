@@ -1,6 +1,6 @@
 /*
- * See selection-backends.h. This is the ext-data-control-v1 side of it, for
- * KWin and the wlroots compositors.
+ * See selection-backends.h. Prefer ext-data-control-v1, with a fallback to
+ * wlr-data-control for older KWin and wlroots compositors.
  *
  * The protocol gives a client without a window the seat's clipboard. The
  * compositor starts after weaselwayd and may come and go, so the runtime
@@ -27,6 +27,7 @@
 #include <wayland-client.h>
 
 #include "ext-data-control-v1-client-protocol.h"
+#include "wlr-data-control-unstable-v1-client-protocol.h"
 
 /* How long to wait for a socket that refused the connection. */
 #define RETRY_SECONDS 3
@@ -47,19 +48,21 @@ struct wayland_selection {
     struct wl_registry *registry;
     struct wl_callback *sync;
     struct wl_seat *seat;
-    struct ext_data_control_manager_v1 *manager;
-    struct ext_data_control_device_v1 *device;
+    uint32_t wlr_manager_name;
+    bool legacy;
+    void *manager;
+    void *device;
     /* A handler found the connection to be of no use; dropped after dispatch. */
     bool drop;
 
     /* The selection when it is not ours, and what it holds. Never NULL. */
-    struct ext_data_control_offer_v1 *offer;
+    void *offer;
     char **mime_types;
 
     /* What we offer; NULL for nothing. Kept for a compositor that comes later. */
     char **own;
     /* What offers it, until the compositor cancels it. */
-    struct ext_data_control_source_v1 *source;
+    void *source;
     /* We have just given the clipboard up; the empty selection is ours. */
     bool withdrawn;
 
@@ -70,6 +73,11 @@ struct wayland_selection {
     const struct selection_listener *listener;
     void *listener_data;
 };
+
+/* Use the generated requests: the two protocols have different wire opcodes. */
+#define CONTROL(selection, operation, ...) \
+    ((selection)->legacy ? zwlr_data_control_##operation(__VA_ARGS__) \
+                         : ext_data_control_##operation(__VA_ARGS__))
 
 static void scan(struct wayland_selection *selection);
 
@@ -98,35 +106,19 @@ set_mime_types(struct wayland_selection *selection, char **mime_types, bool noti
 /* ------------------------------------------------------------------ */
 
 static void
-destroy_offer(struct ext_data_control_offer_v1 *offer)
+destroy_offer(struct wayland_selection *selection, void *offer)
 {
     if (!offer)
         return;
-    g_ptr_array_unref(ext_data_control_offer_v1_get_user_data(offer));
-    ext_data_control_offer_v1_destroy(offer);
+    g_ptr_array_unref(CONTROL(selection, offer_v1_get_user_data, offer));
+    CONTROL(selection, offer_v1_destroy, offer);
 }
 
 static void
-on_offer_mime_type(void *data, struct ext_data_control_offer_v1 *offer, const char *mime_type)
-{
-    g_ptr_array_add(data, g_strdup(mime_type));
-}
-
-static const struct ext_data_control_offer_v1_listener offer_listener = {
-    .offer = on_offer_mime_type,
-};
+on_data_offer(void *data, void *offer);
 
 static void
-on_data_offer(void *data, struct ext_data_control_device_v1 *device,
-              struct ext_data_control_offer_v1 *offer)
-{
-    ext_data_control_offer_v1_add_listener(offer, &offer_listener,
-                                           g_ptr_array_new_with_free_func(g_free));
-}
-
-static void
-on_selection(void *data, struct ext_data_control_device_v1 *device,
-             struct ext_data_control_offer_v1 *offer)
+on_selection(void *data, void *offer)
 {
     struct wayland_selection *selection = data;
     bool withdrawn = selection->withdrawn && !offer;
@@ -134,11 +126,11 @@ on_selection(void *data, struct ext_data_control_device_v1 *device,
     char **mime_types;
 
     selection->withdrawn = false;
-    destroy_offer(selection->offer);
+    destroy_offer(selection, selection->offer);
     selection->offer = NULL;
 
     if (offer && selection->source) {
-        destroy_offer(offer);
+        destroy_offer(selection, offer);
         set_mime_types(selection, NULL, false);
         return;
     }
@@ -148,7 +140,7 @@ on_selection(void *data, struct ext_data_control_device_v1 *device,
     }
 
     selection->offer = offer;
-    types = ext_data_control_offer_v1_get_user_data(offer);
+    types = CONTROL(selection, offer_v1_get_user_data, offer);
     mime_types = g_new0(char *, types->len + 1);
     for (guint i = 0; i < types->len; i++)
         mime_types[i] = g_strdup(g_ptr_array_index(types, i));
@@ -156,14 +148,13 @@ on_selection(void *data, struct ext_data_control_device_v1 *device,
 }
 
 static void
-on_primary_selection(void *data, struct ext_data_control_device_v1 *device,
-                     struct ext_data_control_offer_v1 *offer)
+on_primary_selection(void *data, void *offer)
 {
-    destroy_offer(offer);
+    destroy_offer(data, offer);
 }
 
 static void
-on_finished(void *data, struct ext_data_control_device_v1 *device)
+on_finished(void *data)
 {
     struct wayland_selection *selection = data;
 
@@ -171,20 +162,12 @@ on_finished(void *data, struct ext_data_control_device_v1 *device)
     selection->drop = true;
 }
 
-static const struct ext_data_control_device_v1_listener device_listener = {
-    .data_offer = on_data_offer,
-    .selection = on_selection,
-    .finished = on_finished,
-    .primary_selection = on_primary_selection,
-};
-
 /* ------------------------------------------------------------------ */
 /* What we offer                                                       */
 /* ------------------------------------------------------------------ */
 
 static void
-on_source_send(void *data, struct ext_data_control_source_v1 *source, const char *mime_type,
-               int32_t fd)
+on_source_send(void *data, const char *mime_type, int32_t fd)
 {
     struct wayland_selection *selection = data;
     uint32_t serial;
@@ -202,7 +185,7 @@ on_source_send(void *data, struct ext_data_control_source_v1 *source, const char
 }
 
 static void
-on_source_cancelled(void *data, struct ext_data_control_source_v1 *source)
+on_source_cancelled(void *data, void *source)
 {
     struct wayland_selection *selection = data;
 
@@ -211,31 +194,84 @@ on_source_cancelled(void *data, struct ext_data_control_source_v1 *source)
         selection->source = NULL;
         g_clear_pointer(&selection->own, g_strfreev);
     }
-    ext_data_control_source_v1_destroy(source);
+    CONTROL(selection, source_v1_destroy, source);
 }
 
-static const struct ext_data_control_source_v1_listener source_listener = {
-    .send = on_source_send,
-    .cancelled = on_source_cancelled,
-};
+/* Keep the generated listener signatures typed for both protocols; the
+ * selection logic and ownership state are shared. */
+#define CONTROL_LISTENERS(prefix) \
+    static void prefix##_offer(void *data, struct prefix##_offer_v1 *offer, \
+                               const char *mime_type) \
+    { g_ptr_array_add(data, g_strdup(mime_type)); } \
+    static void prefix##_data_offer(void *data, struct prefix##_device_v1 *device, \
+                                    struct prefix##_offer_v1 *offer) \
+    { on_data_offer(data, offer); } \
+    static void prefix##_selection(void *data, struct prefix##_device_v1 *device, \
+                                   struct prefix##_offer_v1 *offer) \
+    { on_selection(data, offer); } \
+    static void prefix##_primary_selection(void *data, struct prefix##_device_v1 *device, \
+                                           struct prefix##_offer_v1 *offer) \
+    { on_primary_selection(data, offer); } \
+    static void prefix##_finished(void *data, struct prefix##_device_v1 *device) \
+    { on_finished(data); } \
+    static void prefix##_send(void *data, struct prefix##_source_v1 *source, \
+                              const char *mime_type, int32_t fd) \
+    { on_source_send(data, mime_type, fd); } \
+    static void prefix##_cancelled(void *data, struct prefix##_source_v1 *source) \
+    { on_source_cancelled(data, source); } \
+    static const struct prefix##_offer_v1_listener prefix##_offer_listener = { \
+        .offer = prefix##_offer, \
+    }; \
+    static const struct prefix##_device_v1_listener prefix##_device_listener = { \
+        .data_offer = prefix##_data_offer, \
+        .selection = prefix##_selection, \
+        .finished = prefix##_finished, \
+        .primary_selection = prefix##_primary_selection, \
+    }; \
+    static const struct prefix##_source_v1_listener prefix##_source_listener = { \
+        .send = prefix##_send, \
+        .cancelled = prefix##_cancelled, \
+    }
+
+CONTROL_LISTENERS(ext_data_control);
+CONTROL_LISTENERS(zwlr_data_control);
+
+static void
+on_data_offer(void *data, void *offer)
+{
+    struct wayland_selection *selection = data;
+    GPtrArray *types = g_ptr_array_new_with_free_func(g_free);
+
+    if (selection->legacy)
+        zwlr_data_control_offer_v1_add_listener(offer, &zwlr_data_control_offer_listener, types);
+    else
+        ext_data_control_offer_v1_add_listener(offer, &ext_data_control_offer_listener, types);
+}
 
 /* Make the clipboard what selection->own says. */
 static void
 take(struct wayland_selection *selection)
 {
-    struct ext_data_control_source_v1 *source = NULL;
+    void *source = NULL;
 
     if (selection->own) {
-        source = ext_data_control_manager_v1_create_data_source(selection->manager);
-        ext_data_control_source_v1_add_listener(source, &source_listener, selection);
+        if (selection->legacy) {
+            source = zwlr_data_control_manager_v1_create_data_source(selection->manager);
+            zwlr_data_control_source_v1_add_listener(source, &zwlr_data_control_source_listener,
+                                                      selection);
+        } else {
+            source = ext_data_control_manager_v1_create_data_source(selection->manager);
+            ext_data_control_source_v1_add_listener(source, &ext_data_control_source_listener,
+                                                     selection);
+        }
         for (char **type = selection->own; *type; type++)
-            ext_data_control_source_v1_offer(source, *type);
+            CONTROL(selection, source_v1_offer, source, *type);
     }
 
-    ext_data_control_device_v1_set_selection(selection->device, source);
+    CONTROL(selection, device_v1_set_selection, selection->device, source);
     /* The compositor cancels the one it replaces; this is just ours no more. */
     if (selection->source)
-        ext_data_control_source_v1_destroy(selection->source);
+        CONTROL(selection, source_v1_destroy, selection->source);
     selection->source = source;
     selection->withdrawn = !source;
 }
@@ -250,11 +286,17 @@ disconnect(struct wayland_selection *selection)
     bool had_types = selection->mime_types[0] != NULL;
 
     g_clear_handle_id(&selection->display_id, g_source_remove);
-    destroy_offer(selection->offer);
+    destroy_offer(selection, selection->offer);
     selection->offer = NULL;
-    g_clear_pointer(&selection->source, ext_data_control_source_v1_destroy);
-    g_clear_pointer(&selection->device, ext_data_control_device_v1_destroy);
-    g_clear_pointer(&selection->manager, ext_data_control_manager_v1_destroy);
+    if (selection->source)
+        CONTROL(selection, source_v1_destroy, selection->source);
+    if (selection->device)
+        CONTROL(selection, device_v1_destroy, selection->device);
+    if (selection->manager)
+        CONTROL(selection, manager_v1_destroy, selection->manager);
+    selection->source = selection->device = selection->manager = NULL;
+    selection->legacy = false;
+    selection->wlr_manager_name = 0;
     g_clear_pointer(&selection->seat, wl_seat_destroy);
     g_clear_pointer(&selection->sync, wl_callback_destroy);
     g_clear_pointer(&selection->registry, wl_registry_destroy);
@@ -278,6 +320,8 @@ on_global(void *data, struct wl_registry *registry, uint32_t name, const char *i
     else if (!strcmp(interface, ext_data_control_manager_v1_interface.name) && !selection->manager)
         selection->manager =
             wl_registry_bind(registry, name, &ext_data_control_manager_v1_interface, 1);
+    else if (!strcmp(interface, zwlr_data_control_manager_v1_interface.name))
+        selection->wlr_manager_name = name;
 }
 
 static void
@@ -299,18 +343,33 @@ on_sync(void *data, struct wl_callback *callback, uint32_t time)
 
     g_clear_pointer(&selection->sync, wl_callback_destroy);
 
+    if (!selection->manager && selection->wlr_manager_name) {
+        selection->legacy = true;
+        selection->manager = wl_registry_bind(selection->registry, selection->wlr_manager_name,
+                                               &zwlr_data_control_manager_v1_interface, 1);
+    }
     if (!selection->manager || !selection->seat) {
-        g_debug("%s has no ext-data-control-v1", selection->socket);
+        g_debug("%s has no usable Wayland clipboard protocol", selection->socket);
         g_hash_table_add(selection->rejected, g_strdup(selection->socket));
         selection->drop = true;
         return;
     }
 
-    selection->device =
-        ext_data_control_manager_v1_get_data_device(selection->manager, selection->seat);
-    ext_data_control_device_v1_add_listener(selection->device, &device_listener, selection);
+    if (selection->legacy) {
+        selection->device =
+            zwlr_data_control_manager_v1_get_data_device(selection->manager, selection->seat);
+        zwlr_data_control_device_v1_add_listener(selection->device,
+                                                &zwlr_data_control_device_listener, selection);
+    } else {
+        selection->device =
+            ext_data_control_manager_v1_get_data_device(selection->manager, selection->seat);
+        ext_data_control_device_v1_add_listener(selection->device,
+                                               &ext_data_control_device_listener, selection);
+    }
     selection->complained = false;
-    g_message("sharing the session's clipboard (ext-data-control-v1 on %s)", selection->socket);
+    g_message("sharing the session's clipboard (%s on %s)",
+              selection->legacy ? "wlr-data-control-unstable-v1" : "ext-data-control-v1",
+              selection->socket);
 
     /* Ours replaces what is there; otherwise the compositor says what that is. */
     if (selection->own)
@@ -408,7 +467,7 @@ scan(struct wayland_selection *selection)
         selection->retry_id = g_timeout_add_seconds(RETRY_SECONDS, on_retry, selection);
 
     if (!selection->complained)
-        g_debug("no compositor with ext-data-control-v1 in %s yet", selection->runtime_dir);
+        g_debug("no compositor with a Wayland clipboard protocol in %s yet", selection->runtime_dir);
     selection->complained = true;
 }
 
@@ -578,7 +637,7 @@ wayland_selection_read(struct wayland_selection *selection, const char *mime_typ
 
     /* libwayland sends a copy of the write end; ours goes, or the read would
      * never see the end. */
-    ext_data_control_offer_v1_receive(selection->offer, mime_type, fds[1]);
+    CONTROL(selection, offer_v1_receive, selection->offer, mime_type, fds[1]);
     flush(selection);
     close(fds[1]);
     selection_read_pipe(task, fds[0]);
