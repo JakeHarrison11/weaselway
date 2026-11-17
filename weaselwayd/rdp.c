@@ -13,6 +13,7 @@
 #include "audio.h"
 #include "clipboard.h"
 #include "input.h"
+#include "monitor-layout.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -871,25 +872,22 @@ static UINT
 disp_monitor_layout(DispServerContext *context, const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *pdu)
 {
     struct peer_context *peer_ctx = context->custom;
-    const DISPLAY_CONTROL_MONITOR_LAYOUT *primary = NULL;
+    int width, height;
 
     if (pdu->NumMonitors == 0)
         return CHANNEL_RC_OK;
 
-    /* One screen: the primary monitor, or the first if none is flagged. */
-    for (UINT32 i = 0; i < pdu->NumMonitors; i++) {
-        if (pdu->Monitors[i].Flags & DISPLAY_CONTROL_MONITOR_PRIMARY) {
-            primary = &pdu->Monitors[i];
-            break;
-        }
+    if (!monitor_layout_extent(pdu, &width, &height)) {
+        g_warning("ignoring unsupported %u-monitor layout (maximum desktop size is %u x %u)",
+                  pdu->NumMonitors, WEASELWAY_MAX_DESKTOP_DIMENSION,
+                  WEASELWAY_MAX_DESKTOP_DIMENSION);
+        return CHANNEL_RC_OK;
     }
-    if (!primary)
-        primary = &pdu->Monitors[0];
 
     g_mutex_lock(&peer_ctx->notes_lock);
     peer_ctx->disp_requested = true;
-    peer_ctx->disp_width = (int)primary->Width;
-    peer_ctx->disp_height = (int)primary->Height;
+    peer_ctx->disp_width = width;
+    peer_ctx->disp_height = height;
     g_mutex_unlock(&peer_ctx->notes_lock);
     wake(peer_ctx->server);
     return CHANNEL_RC_OK;
@@ -1027,7 +1025,7 @@ setup_disp(struct peer_context *peer_ctx)
         return;
 
     disp->custom = peer_ctx;
-    disp->MaxNumMonitors = 1;
+    disp->MaxNumMonitors = WEASELWAY_MAX_MONITORS;
     disp->MaxMonitorAreaFactorA = DISPLAY_CONTROL_MAX_MONITOR_WIDTH;
     disp->MaxMonitorAreaFactorB = DISPLAY_CONTROL_MAX_MONITOR_HEIGHT;
     disp->DispMonitorLayout = disp_monitor_layout;

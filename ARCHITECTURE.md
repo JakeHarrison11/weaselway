@@ -56,6 +56,11 @@ channel, `Weaselway::Display`, on which it reports two things about the monitor 
 - how long before that monitor's vblank each frame was ready. weaselwayd shifts dxgdrm's vblank to
   keep this at about 3 ms ([0031](docs/adr/0031-vblank-phase-from-the-viewer.md)).
 
+With `/multimon`, the viewer sends Windows monitor positions and sizes over RDP's display control
+channel and opens one window per monitor. weaselwayd resizes the single dxgdrm display to the
+bounding rectangle of that layout, so the compositor presents one desktop across the monitors. The
+combined width and height must each fit dxgdrm's 8192-pixel limit.
+
 While no compositor owns the display, the client gets a screen with "No compositor running". While
 the compositor has the display off, it gets "Screen is off"
 ([0026](docs/adr/0026-placeholder-without-a-compositor.md)).

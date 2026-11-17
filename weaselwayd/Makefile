@@ -13,12 +13,12 @@ CONTROL_PROTOCOLS := ext-data-control-v1 wlr-data-control-unstable-v1
 CONTROL_HEADERS := $(addsuffix -client-protocol.h,$(CONTROL_PROTOCOLS))
 CONTROL_CODE := $(addsuffix -protocol.c,$(CONTROL_PROTOCOLS))
 SELECTION := selection.c selection-mutter.c selection-wayland.c $(CONTROL_CODE)
-SOURCES := weaselwayd.c rdp.c input.c audio.c clipboard.c formats.c placeholder.c log.c \
+SOURCES := weaselwayd.c rdp.c monitor-layout.c input.c audio.c clipboard.c formats.c placeholder.c log.c \
            $(SELECTION)
 # The gfxredir server channel, which distributions build FreeRDP without; see
 # gfxredir/README.md. Upstream code, so it is spared our warnings.
 GFXREDIR := gfxredir/gfxredir_server.c gfxredir/gfxredir_common.c
-HEADERS := rdp.h input.h audio.h clipboard.h selection.h selection-backends.h formats.h \
+HEADERS := rdp.h monitor-layout.h input.h audio.h clipboard.h selection.h selection-backends.h formats.h \
            placeholder.h log.h $(CONTROL_HEADERS) $(wildcard gfxredir/*.h)
 OBJECTS := $(SOURCES:.c=.o) $(GFXREDIR:.c=.o)
 
@@ -101,6 +101,10 @@ TEST_LIBS := $(shell pkg-config --libs $(TEST_PKGS))
 tests/test-formats: tests/test-formats.c formats.c formats.h
 	$(CC) $(TEST_CFLAGS) -o $@ tests/test-formats.c formats.c $(TEST_LIBS)
 
+tests/test-monitor-layout: tests/test-monitor-layout.c monitor-layout.c monitor-layout.h
+	$(CC) $(TEST_CFLAGS) $(shell pkg-config --cflags freerdp3) -o $@ \
+		tests/test-monitor-layout.c monitor-layout.c $(TEST_LIBS)
+
 # For trying the selection against a running compositor; see
 # tests/selection-mutter.sh and tests/selection-kwin.sh.
 tests/selection-tool: tests/selection-tool.c $(SELECTION) selection.h selection-backends.h \
@@ -125,14 +129,16 @@ tests/egl-load: tests/egl-load.c tests/xdg-shell-protocol.c tests/xdg-shell-clie
 	$(CC) $(TEST_CFLAGS) -Itests -o $@ tests/egl-load.c tests/xdg-shell-protocol.c \
 		$(shell pkg-config --cflags --libs wayland-client wayland-egl egl glesv2)
 
-check: tests/test-formats
+check: tests/test-formats tests/test-monitor-layout
 	tests/test-formats
+	tests/test-monitor-layout
 
 install: weaselwayd
 	install -D -m 0755 weaselwayd $(DESTDIR)$(PREFIX)/bin/weaselwayd
 
 clean:
-	rm -f weaselwayd weaselwayd-asan $(OBJECTS) $(ASAN_OBJECTS) tests/test-formats tests/selection-tool \
+	rm -f weaselwayd weaselwayd-asan $(OBJECTS) $(ASAN_OBJECTS) \
+		tests/test-formats tests/test-monitor-layout tests/selection-tool \
 		tests/rdp-harness tests/egl-load tests/xdg-shell-client-protocol.h tests/xdg-shell-protocol.c \
 		$(CONTROL_HEADERS) $(CONTROL_CODE)
 

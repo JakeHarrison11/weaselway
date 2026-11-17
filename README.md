@@ -407,6 +407,13 @@ deviates from the NixOS defaults in two places:
 `ww-start-viewer` appends its arguments to the `sdl-freerdp.exe` command line,
 so any FreeRDP option can be added or overridden for one run.
 
+To show the desktop across multiple Windows monitors, run
+`ww-start-viewer /multimon`. The viewer opens one borderless window on each
+monitor and shows the corresponding part of the Linux desktop. The Linux
+compositor sees this as one display spanning the combined monitor bounds,
+rather than as independently configurable outputs. To use one viewer window,
+pass `/multimon:off`.
+
 The viewer lets Windows turn the monitor off and start the screen saver
 (`/sdl-allow-screensaver`). Without that option, SDL keeps the monitor on
 while the viewer runs, even when Windows is locked.
