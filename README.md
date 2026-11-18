@@ -417,6 +417,10 @@ height must each be at most 8192 pixels; use the viewer's `/monitors:` option
 to select a subset if needed. Without `/multimon`, the viewer and compositor
 use one display as before.
 
+If display settings change on Windows while the viewer is open and the Linux
+outputs do not update, close and reopen the viewer to send the initial layout
+again.
+
 This requires the multi-output `dxgdrm` module included in the NixOS build.
 For other distributions, see [Using a different dxgdrm build](distro/README.md#using-a-different-dxgdrm-build).
 

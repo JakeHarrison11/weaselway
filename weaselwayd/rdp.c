@@ -882,6 +882,10 @@ disp_monitor_layout(DispServerContext *context, const DISPLAY_CONTROL_MONITOR_LA
         g_warning("ignoring unsupported %u-monitor layout (no overlap, at most %d x %d pixels)",
                   pdu->NumMonitors, WEASELWAY_MAX_DESKTOP_DIMENSION,
                   WEASELWAY_MAX_DESKTOP_DIMENSION);
+        for (unsigned i = 0; pdu->Monitors && i < pdu->NumMonitors && i < RDP_MAX_OUTPUTS; i++) {
+            const DISPLAY_CONTROL_MONITOR_LAYOUT *m = &pdu->Monitors[i];
+            g_debug("rejected monitor %u: %ux%u at (%d,%d)", i, m->Width, m->Height, m->Left, m->Top);
+        }
         return CHANNEL_RC_OK;
     }
 
@@ -1419,13 +1423,24 @@ peer_finish_activation(freerdp_peer *client)
     /* The client has no pointer shape until we send one. */
     peer_send_pointer(peer_ctx);
 
-    /* The client dictates the size: the screen is asked to take the one it
-     * connected with. */
-    int width = (int)freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopWidth);
-    int height = (int)freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopHeight);
+    rdpSettings *settings = client->context->settings;
+    int width = (int)freerdp_settings_get_uint32(settings, FreeRDP_DesktopWidth);
+    int height = (int)freerdp_settings_get_uint32(settings, FreeRDP_DesktopHeight);
     struct rdp_layout layout = {
         .count = 1, .width = width, .height = height, .outputs = { { 0, 0, width, height } },
     };
+    UINT32 count = freerdp_settings_get_uint32(settings, FreeRDP_MonitorCount);
+    if (count > 1) {
+        /* The SDL viewer can send overlapping rectangles in Display Control
+         * even when its initial Client Monitor Data is correct. */
+        const rdpMonitor *monitors = freerdp_settings_get_pointer(settings, FreeRDP_MonitorDefArray);
+        struct rdp_layout initial;
+        if (count > freerdp_settings_get_uint32(settings, FreeRDP_MonitorDefArraySize) ||
+            !monitor_layout_from_client(monitors, count, &initial))
+            g_warning("ignoring unsupported initial %u-monitor layout", count);
+        else
+            layout = initial;
+    }
     request_layout(peer_ctx->server, &layout);
 
     /* Before gfxredir, as Weston does. The first frame goes out once the

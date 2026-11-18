@@ -56,3 +56,24 @@ monitor_layout_parse(const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *pdu, struct rdp_l
     }
     return true;
 }
+
+bool
+monitor_layout_from_client(const rdpMonitor *monitors, unsigned count, struct rdp_layout *layout)
+{
+    DISPLAY_CONTROL_MONITOR_LAYOUT rectangles[RDP_MAX_OUTPUTS] = { 0 };
+    DISPLAY_CONTROL_MONITOR_LAYOUT_PDU pdu = { .NumMonitors = count, .Monitors = rectangles };
+
+    if (!monitors || count < 2 || count > RDP_MAX_OUTPUTS)
+        return false;
+
+    for (unsigned i = 0; i < count; i++) {
+        const rdpMonitor *m = &monitors[i];
+        if (m->width <= 0 || m->height <= 0)
+            return false;
+        rectangles[i] = (DISPLAY_CONTROL_MONITOR_LAYOUT) {
+            .Flags = m->is_primary ? DISPLAY_CONTROL_MONITOR_PRIMARY : 0,
+            .Left = m->x, .Top = m->y, .Width = (UINT32)m->width, .Height = (UINT32)m->height,
+        };
+    }
+    return monitor_layout_parse(&pdu, layout);
+}
