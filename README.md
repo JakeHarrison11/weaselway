@@ -419,6 +419,27 @@ height must each be at most 8192 pixels; use the viewer's `/monitors:` option
 to select a subset if needed. Without `/multimon`, the viewer and compositor
 use one display as before.
 
+To choose monitors interactively, run:
+
+```sh
+ww-start-viewer --select-monitors
+```
+
+Enter the Windows monitor IDs shown in the list, separated by commas (for
+example `1,2`). The first ID is the primary monitor. Press Enter without
+entering any IDs to cancel. To list IDs without connecting, use
+`ww-start-viewer --list-monitors`. To reuse a selection without a prompt, run
+`ww-start-viewer /multimon /monitors:1,2` (replace `1,2` with your chosen IDs).
+Close the existing viewer before connecting with a different selection.
+
+The SDL viewer's shortcuts use the **right-hand Ctrl and Shift keys**:
+
+- **Right Ctrl + Right Shift + M** minimizes the viewer.
+- **Right Ctrl + Right Shift + G** releases or recaptures keyboard input.
+- **Right Ctrl + Right Shift + Enter** toggles fullscreen.
+- **Right Ctrl + Right Shift + D** disconnects the viewer without stopping
+  the Linux desktop.
+
 If display settings change on Windows while the viewer is open and the Linux
 outputs do not update, close and reopen the viewer to send the initial layout
 again.

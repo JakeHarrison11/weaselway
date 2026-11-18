@@ -10,6 +10,36 @@ set -eu -o pipefail
 # The NixOS image ships the client in the store and points this at it.
 VIEWER="${WEASELWAY_VIEWER:-/mnt/c/Weaselway/sdl-freerdp.exe}"
 
+list_monitors() {
+    local status=0
+    "${VIEWER}" /list:monitor || status=$?
+    # FreeRDP returns 255 after successfully handling its list action.
+    if [ "${status}" != 0 ] && [ "${status}" != 255 ]; then
+        return "${status}"
+    fi
+}
+
+if [ "${1:-}" = --list-monitors ]; then
+    list_monitors
+    exit 0
+fi
+
+if [ "${1:-}" = --select-monitors ]; then
+    shift
+    list_monitors
+    printf 'Monitor IDs to use (comma-separated, first is primary; blank cancels): ' >&2
+    MONITORS=
+    if ! read -r MONITORS || [ -z "${MONITORS}" ]; then
+        echo "Monitor selection cancelled." >&2
+        exit 0
+    fi
+    if [[ ! "${MONITORS}" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+        echo "error: enter monitor IDs separated by commas, for example 1,2" >&2
+        exit 1
+    fi
+    set -- /multimon "/monitors:${MONITORS}" "$@"
+fi
+
 # The port weaselwayd listens on: environment.d gives it to the user manager,
 # which is what weaselwayd's unit inherits.
 PORT="$(systemctl --user show-environment | sed -n 's/^WEASELWAY_VSOCK_PORT=//p')"
