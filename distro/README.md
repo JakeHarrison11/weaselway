@@ -1,5 +1,10 @@
 # Weaselway on Ubuntu, Debian, Arch Linux and CachyOS
 
+For an installable Debian 13 amd64 binary bundle and the build command, see
+[Debian WSL binary package](debian/README.md). That bundle is tied to the exact
+WSL kernel it was built for; the source installer below also supports other
+distributions.
+
 This guide installs weaselway into an Ubuntu 26.04, Debian 13 (Trixie), Arch
 Linux or CachyOS WSL distro instead of the NixOS image. You get GNOME, Plasma
 or Hyprland on the virtual display, shown on Windows by the same viewer.

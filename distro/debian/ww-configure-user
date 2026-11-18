@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+if [ "$(id -u)" != 0 ] || [ "$#" != 1 ]; then
+    echo "usage: sudo ww-configure-user YOUR_LINUX_USERNAME" >&2
+    exit 1
+fi
+user=$1
+uid=$(id -u -- "$user")
+if [ "$uid" -lt 1000 ] || [ "$uid" -eq 65534 ]; then
+    echo "error: choose a regular, non-root Linux user" >&2
+    exit 1
+fi
+user=$(id -un -- "$user")
+for group in render video input; do
+    if ! getent group "$group" >/dev/null; then
+        groupadd --system "$group"
+    fi
+done
+usermod -aG render,video,input "$user"
+install -d /etc/systemd/user/weaselwayd.service.d
+printf '[Unit]\nConditionUser=\nConditionUser=%s\n' "$user" \
+    > /etc/systemd/user/weaselwayd.service.d/10-weaselway-user.conf
+systemctl --global enable weaselwayd.service
+echo "Weaselway is configured for $user. Save your work, then run wsl --shutdown in Windows."
+echo "After reopening Debian, run ww-start-session plasma and ww-start-viewer --select-monitors."

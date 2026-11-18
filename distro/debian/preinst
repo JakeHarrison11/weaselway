@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+case "$1" in
+    install|upgrade)
+        . /etc/os-release
+        if [ "$ID" != debian ] || [ "${VERSION_ID:-}" != 13 ]; then
+            echo "weaselway-wsl requires Debian 13 (Trixie), not $PRETTY_NAME." >&2
+            exit 1
+        fi
+        if [ "$(uname -r)" != "@KERNEL@" ]; then
+            echo "weaselway-wsl: this driver requires WSL kernel @KERNEL@; running $(uname -r)." >&2
+            echo "Install a package built for your kernel. Do not force-load this module." >&2
+            exit 1
+        fi
+        for legacy in /usr/local/bin/weaselwayd \
+            /etc/systemd/user/weaselwayd.service /etc/systemd/system/weaselway-prep.service; do
+            if [ -e "$legacy" ] || [ -L "$legacy" ]; then
+                echo "weaselway-wsl: source-installation file $legacy would override this package." >&2
+                echo "Use a fresh Debian WSL distro; back up and migrate existing installations separately." >&2
+                exit 1
+            fi
+        done
+        ;;
+esac

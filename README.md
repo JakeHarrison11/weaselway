@@ -83,8 +83,10 @@ ww-start-viewer
 The release images are the quickest way in. To add weaselway to a NixOS-WSL
 system you already have, see
 [Into an existing NixOS-WSL system](#into-an-existing-nixos-wsl-system).
-[distro/README.md](distro/README.md) installs it into an Ubuntu, Arch Linux or
-CachyOS distro instead.
+[distro/README.md](distro/README.md) installs it into an Ubuntu, Debian, Arch
+Linux or CachyOS distro instead. For Debian 13 amd64, an installable
+[binary bundle](distro/debian/README.md) includes the multi-monitor stack and
+its patched dependencies, tied to the exact WSL kernel it was built for.
 
 ### From the image
 
@@ -595,8 +597,8 @@ details.
 - [docs/adr](docs/adr) holds the architecture decision records, one file per
   design decision with its reasons.
 - [CHANGELOG.md](CHANGELOG.md) lists the changes in each release.
-- [distro/README.md](distro/README.md) installs weaselway on Ubuntu, Arch Linux
-  or CachyOS instead of NixOS.
+- [distro/README.md](distro/README.md) installs weaselway on Ubuntu, Debian,
+  Arch Linux or CachyOS instead of NixOS.
 
 ## A note on AI
 

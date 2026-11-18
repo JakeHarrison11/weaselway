@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+if [ "$1" = configure ]; then
+    for group in render video input; do
+        if ! getent group "$group" >/dev/null; then
+            groupadd --system "$group"
+        fi
+    done
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+        udevadm control --reload
+    fi
+    deb-systemd-helper enable weaselway-prep.service >/dev/null
+    echo "Weaselway installed. Run: sudo ww-configure-user YOUR_LINUX_USERNAME"
+    echo "Then save your work and run wsl --shutdown from Windows."
+fi
