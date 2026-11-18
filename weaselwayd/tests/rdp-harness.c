@@ -27,7 +27,7 @@ on_changed(void *data)
     struct rdp_layout layout;
     uint32_t refresh_mhz;
 
-    if (rdp_server_take_layout_request(server, &layout, &refresh_mhz))
+    if (rdp_server_take_layout_request(server, &layout, &refresh_mhz, NULL))
         rdp_server_set_screen_size(server, layout.width, layout.height);
     rdp_server_state(server);
 }

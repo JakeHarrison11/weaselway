@@ -410,9 +410,11 @@ so any FreeRDP option can be added or overridden for one run.
 To show the desktop across multiple Windows monitors, run
 `ww-start-viewer /multimon`. The Linux compositor sees up to four separate
 virtual outputs, and the viewer shows each output on its corresponding Windows
-monitor. In the Linux display settings, match the order and arrangement shown
-in Windows so the pointer moves between displays correctly. Use each virtual
-output's preferred mode without rotation or scaling. The combined width and
+monitor. On Plasma, Weaselway uses `kscreen-doctor` to match the Windows
+monitor positions on each connection. In other compositors, match the order
+and arrangement in your Linux display settings so the pointer moves between
+displays correctly. Use each virtual output's preferred mode without rotation
+or scaling. The combined width and
 height must each be at most 8192 pixels; use the viewer's `/monitors:` option
 to select a subset if needed. Without `/multimon`, the viewer and compositor
 use one display as before.

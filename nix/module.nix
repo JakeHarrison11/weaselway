@@ -230,6 +230,7 @@ in
         # Serves the compositor's frames, input and audio to the viewer. Waits
         # for a compositor and outlives it, so it runs with the user manager.
         systemd.user.services.weaselwayd = {
+          path = lib.optional config.services.desktopManager.plasma6.enable pkgs.kdePackages.libkscreen;
           description = "Weaselway display server for the Windows viewer";
           documentation = [ "https://github.com/weaselway/weaselway" ];
           wantedBy = [ "default.target" ];

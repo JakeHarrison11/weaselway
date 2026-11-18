@@ -403,7 +403,7 @@ class Ubuntu(Distro):
             "gnome-text-editor", "gnome-backgrounds", "xdg-desktop-portal-gnome",
         ),
         Desktop.KDE: (
-            "plasma-desktop", "plasma-workspace", "kwin-wayland", "konsole", "dolphin", "xdg-desktop-portal-kde",
+            "plasma-desktop", "plasma-workspace", "kwin-wayland", "libkscreen-bin", "konsole", "dolphin", "xdg-desktop-portal-kde",
         ),
         Desktop.HYPRLAND: ("hyprland", "kitty", "xdg-desktop-portal-hyprland"),
     }  # fmt: skip
@@ -583,7 +583,7 @@ class Arch(Distro):
             "gnome-text-editor", "gnome-backgrounds", "gnome-keyring", "xdg-desktop-portal-gnome",
         ),
         Desktop.KDE: (
-            "plasma-desktop", "plasma-workspace", "plasma-integration", "kglobalacceld", "xdg-desktop-portal",
+            "plasma-desktop", "plasma-workspace", "plasma-integration", "libkscreen", "kglobalacceld", "xdg-desktop-portal",
             "xdg-desktop-portal-kde", "konsole", "dolphin",
         ),
         Desktop.HYPRLAND: ("hyprland", "kitty", "xdg-desktop-portal-hyprland"),

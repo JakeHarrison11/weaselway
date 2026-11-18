@@ -228,6 +228,7 @@ struct rdp_server {
     struct rdp_layout wanted_layout;
     gint64 wanted_deadline;
     bool size_request_pending;
+    bool new_connection_layout;
     /* The refresh rate of the client's monitor; 0 until it says. */
     uint32_t wanted_refresh_mhz;
     /* The last PRESENT_TIMING, until it is taken. */
@@ -1442,6 +1443,7 @@ peer_finish_activation(freerdp_peer *client)
             layout = initial;
     }
     request_layout(peer_ctx->server, &layout);
+    peer_ctx->server->new_connection_layout = true;
 
     /* Before gfxredir, as Weston does. The first frame goes out once the
      * client has confirmed gfxredir caps. */
@@ -2194,13 +2196,17 @@ rdp_server_state(struct rdp_server *server)
 
 bool
 rdp_server_take_layout_request(struct rdp_server *server, struct rdp_layout *layout,
-                               uint32_t *refresh_mhz)
+                               uint32_t *refresh_mhz, bool *new_connection)
 {
     /* A refresh rate can come before the size; it waits for it. */
     bool requested = server->size_request_pending && server->wanted_layout.count > 0;
 
-    if (requested)
+    if (new_connection)
+        *new_connection = requested && server->new_connection_layout;
+    if (requested) {
         server->size_request_pending = false;
+        server->new_connection_layout = false;
+    }
     *layout = server->wanted_layout;
     *refresh_mhz = server->wanted_refresh_mhz;
     return requested;
