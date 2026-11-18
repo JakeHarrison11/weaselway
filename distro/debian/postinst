@@ -9,6 +9,8 @@ if [ "$1" = configure ]; then
     done
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload
+    fi
+    if [ -S /run/udev/control ]; then
         udevadm control --reload
     fi
     deb-systemd-helper enable weaselway-prep.service >/dev/null

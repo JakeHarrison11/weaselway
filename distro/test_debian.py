@@ -77,6 +77,23 @@ class DebianPackageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "multiple candidates"):
                     builder.companion_packages(root)
 
+    def test_removal_without_systemd_or_udev_tools(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "systemd").mkdir()
+            helper = root / "deb-systemd-helper"
+            helper.write_text("#!/bin/sh\nexit 0\n")
+            helper.chmod(0o755)
+            script = (HERE / "debian/postrm").read_text()
+            script = script.replace("/run/systemd/system", str(root / "systemd"))
+            script = script.replace("/run/udev/control", str(root / "no-udev-socket"))
+            result = subprocess.run(
+                ["sh", "-c", script, "postrm", "remove"],
+                env={**os.environ, "PATH": str(root)}, text=True, capture_output=True,
+                executable="/bin/sh",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
