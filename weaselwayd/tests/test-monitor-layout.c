@@ -76,6 +76,8 @@ test_preserves_monitor_indices(void)
     g_assert_cmpint(result[1].height, ==, 1440);
 
     monitors[1].Left = monitors[1].Top = 0;
+    g_assert_true(monitor_layout_parse(&layout, result, &count));
+    monitors[1].Left = -1;
     g_assert_false(monitor_layout_parse(&layout, result, &count));
 }
 

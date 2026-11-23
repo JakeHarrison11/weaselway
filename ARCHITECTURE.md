@@ -599,7 +599,7 @@ The shell tests are not part of the build. They need mutter or KWin, D-Bus and, 
 
 ## CI
 
-[debian-package.yml](.github/workflows/debian-package.yml) runs the distro tests and builds the
+[debian-package.yml](.github/workflows/debian-package.yml) runs the distro and daemon tests and builds the
 Debian 13 bundle in WSL on a Windows runner. The bundle is uploaded as a workflow artifact and is
 tied to the runner's WSL kernel. See [the Debian package guide](distro/debian/README.md).
 

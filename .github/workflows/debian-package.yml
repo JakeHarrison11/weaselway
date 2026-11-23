@@ -46,6 +46,14 @@ jobs:
       - name: Test Debian package helpers
         run: python3 -m unittest discover -s distro -p 'test_*.py'
 
+      - name: Test the daemon
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libegl-dev libgles-dev libgbm-dev libdrm-dev freerdp3-dev libwinpr3-dev \
+            libglib2.0-dev libpng-dev libwayland-dev
+          make -C weaselwayd check
+
   package:
     needs: test
     runs-on: windows-2025
