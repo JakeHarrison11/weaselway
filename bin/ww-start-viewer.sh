@@ -7,8 +7,18 @@
 
 set -eu -o pipefail
 
-# The NixOS image ships the client in the store and points this at it.
-VIEWER="${WEASELWAY_VIEWER:-/mnt/c/Weaselway/sdl-freerdp.exe}"
+# The NixOS wrapper sets this to the store; distro installs use /opt.
+VIEWER="${WEASELWAY_VIEWER:-/opt/weaselway/viewer/sdl-freerdp.exe}"
+
+check_viewer() {
+    if ! command -v -- "${VIEWER}" > /dev/null; then
+        echo "error: viewer not found or not executable: ${VIEWER}" >&2
+        echo "Check WEASELWAY_VIEWER (unset it to use the installed viewer), or reinstall the viewer." >&2
+        exit 1
+    fi
+}
+
+check_viewer
 
 list_monitors() {
     local status=0
@@ -41,6 +51,7 @@ if [ -n "${WEASELWAY_VIEWER_COPY_TO:-}" ]; then
         mv -T "${TMP}" "${TARGET}" 2> /dev/null || rm -rf "${TMP}"
     fi
     VIEWER="${TARGET}/${VIEWER##*/}"
+    check_viewer
 fi
 
 if [ "${1:-}" = --list-monitors ]; then

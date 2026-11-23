@@ -191,6 +191,10 @@ puts a shortcut on the Windows desktop that does both. The main README
 describes these commands under [Using it](../README.md#using-it). To stop the
 session, run `ww-start-session stop`.
 
+The installed viewer is `/opt/weaselway/viewer/sdl-freerdp.exe`, including in
+shells that do not load `/etc/profile.d`. If `WEASELWAY_VIEWER` points to a
+missing old build, unset it to use the installed viewer.
+
 ## Using a different dxgdrm build
 
 The published dxgdrm release supports multiple monitors. To use a different

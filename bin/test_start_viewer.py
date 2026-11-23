@@ -26,6 +26,9 @@ class MonitorSelectionTests(unittest.TestCase):
             Path(__file__).with_name("ww-start-viewer.sh").read_text().replace(
                 "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
                 str(self.directory / "unavailable-powershell"),
+            ).replace(
+                "/opt/weaselway/viewer/sdl-freerdp.exe",
+                str(self.viewer),
             )
         )
         self.environment = {
@@ -48,6 +51,21 @@ class MonitorSelectionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("secondary", result.stdout)
         self.assertEqual(self.calls.read_text(), "/list:monitor\n")
+
+    def test_installed_viewer_is_default_without_profile_environment(self):
+        del self.environment["WEASELWAY_VIEWER"]
+        result = self.launch("--list-monitors")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls.read_text(), "/list:monitor\n")
+
+    def test_missing_override_is_reported_without_using_default(self):
+        self.environment["WEASELWAY_VIEWER"] = str(self.directory / "missing.exe")
+        result = self.launch("--list-monitors")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("viewer not found or not executable", result.stderr)
+        self.assertIn("unset", result.stderr)
+        self.assertIn(self.environment["WEASELWAY_VIEWER"], result.stderr)
+        self.assertFalse(self.calls.exists())
 
     def test_list_failure_is_reported(self):
         self.environment["LIST_STATUS"] = "7"
