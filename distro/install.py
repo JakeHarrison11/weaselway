@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install weaselway into an Ubuntu or Arch Linux (and CachyOS) WSL distro.
+"""Install weaselway into Ubuntu, Debian Trixie KDE, or Arch Linux (and CachyOS) WSL.
 
 The desktop (GNOME, Plasma or Hyprland) and PipeWire come from the distro,
 with weaselway's patches built into the compositor packages. The patched Mesa
@@ -168,7 +168,7 @@ def ask_bool(question: str) -> bool:
 
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Install weaselway into an Ubuntu or Arch Linux WSL distro. See distro/README.md.",
+        description="Install weaselway into a supported WSL distro. See distro/README.md.",
         epilog="Options that are not given are asked for interactively.",
     )
     parser.add_argument("--desktop", choices=[d.value for d in Desktop], help="the desktop to install")
@@ -263,6 +263,7 @@ BACKPORTS: Final[Mapping[str, Sequence[Backport]]] = {
     # KWin reports its damage (FB_DAMAGE_CLIPS), so weaselwayd does not read back
     # the whole screen every frame.
     "kwin": [
+        Backport((6, 3), (6, 4), ("kwin-6.3-fb-damage-clips.patch",)),
         Backport((6, 6), (6, 7), ("kwin-6.6-fb-damage-clips.patch",)),
         Backport((6, 7), (6, 8), ("kwin-6.7-fb-damage-clips.patch",)),
         Backport((6, 8), (6, 9), ("kwin-6.8-fb-damage-clips.patch",)),
@@ -294,6 +295,11 @@ def backport_patches(package: str, version: str) -> list[Path]:
 
     >>> [p.name for p in backport_patches("kwin", "4:6.6.6-0ubuntu0.1")]
     ['kwin-6.6-fb-damage-clips.patch']
+    >>> [p.name for p in backport_patches("kwin", "4:6.3.6-1")]
+    ['kwin-6.3-fb-damage-clips.patch']
+    >>> backport_patches("kwin", "6.4.0")  # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+    InstallError: weaselway has no patch for kwin 6.4.0 yet
     >>> [p.name for p in backport_patches("mutter", "50.3-0ubuntu1")]
     ['mutter-stage-relayout.patch', 'mutter-kms-fd0.patch']
     >>> [p.name for p in backport_patches("mutter", "51.0-1")][-1]
@@ -357,6 +363,11 @@ class Distro(ABC):
         return packages
 
     def patched_packages(self, options: Options) -> list[str]:
+        """Packages rebuilt for this selection.
+
+        >>> DebianTrixie().patched_packages(Options(Desktop.KDE, False, False, 1, False))
+        ['freerdp', 'kwin']
+        """
         packages = ["freerdp"] if self.freerdp_uses_ffmpeg else []
         return packages + list(COMPOSITOR_PACKAGES[options.desktop])
 
@@ -433,7 +444,8 @@ class Ubuntu(Distro):
         work = BUILD / "packages" / package
         shutil.rmtree(work, ignore_errors=True)
         work.mkdir(parents=True)
-        run("apt-get", "source", "-q", package, cwd=work)
+        source_package = self.apt_source_package(package)
+        run("apt-get", "source", "-q", source_package, cwd=work)
         (tree,) = [d for d in work.iterdir() if d.is_dir()]
         version = output("dpkg-parsechangelog", "-S", "Version", cwd=tree)
         patches = backport_patches(package, version)
@@ -444,7 +456,7 @@ class Ubuntu(Distro):
         query = "${db:Status-Status} ${Package} ${source:Package} ${Version}\n"
         for line in output("dpkg-query", "-W", "-f", query).splitlines():
             status, name, source, installed_version = line.split()
-            if status == "installed" and source == package:
+            if status == "installed" and source == source_package:
                 installed[name] = installed_version
         if self.up_to_date(package, target, patches, set(installed.values()) == {target}):
             return
@@ -455,7 +467,7 @@ class Ubuntu(Distro):
         changelog = tree / "debian" / "changelog"
         date = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S +0000")
         entry = (
-            f"{package} ({target}) {distribution}; urgency=medium\n\n"
+            f"{source_package} ({target}) {distribution}; urgency=medium\n\n"
             f"  * weaselway: {', '.join(p.name for p in patches)}\n\n"
             f" -- weaselway <weaselway@localhost>  {date}\n\n"
         )
@@ -473,16 +485,82 @@ class Ubuntu(Distro):
         }
         run("dpkg-buildpackage", "-b", "-uc", "-us", cwd=tree, env=env)
 
-        # Hyprland builds against aquamarine, and its -dev package wants the
-        # library of the same version.
-        def wanted(name: str) -> bool:
-            return name in installed or (package == "aquamarine" and name.endswith("-dev"))
-
-        debs = [deb for deb in sorted(work.glob("*.deb")) if wanted(output("dpkg-deb", "-f", deb, "Package"))]
+        debs = self.patched_debs(package, installed, work)
         if not debs:
             die(f"none of the packages built from {package} is installed")
         self.apt_get("install", "-y", "--allow-downgrades", *[str(deb) for deb in debs])
         self.stamp(package).write_text(f"{target} {patch_digest(patches)}")
+
+    @staticmethod
+    def patched_debs(package: str, installed: Mapping[str, str], work: Path) -> list[Path]:
+        def wanted(name: str) -> bool:
+            return (
+                name in installed
+                # Hyprland needs aquamarine's matching development package.
+                or (package == "aquamarine" and name.endswith("-dev"))
+                # Newer Debian FreeRDP packages depend on this renamed binary
+                # at the exact same version, even if it wasn't installed yet.
+                or (package == "freerdp" and name == "winpr-utils")
+            )
+
+        return [deb for deb in sorted(work.glob("*.deb")) if wanted(output("dpkg-deb", "-f", deb, "Package"))]
+
+    def apt_source_package(self, package: str) -> str:
+        return package
+
+
+class DebianTrixie(Ubuntu):
+    name = "Debian Trixie"
+    # Debian builds FreeRDP with FFmpeg, whose PCM handling needs the patch.
+    freerdp_uses_ffmpeg = True
+
+    def apt_source_package(self, package: str) -> str:
+        """Return the apt source package for a logical patched package.
+
+        >>> DebianTrixie().apt_source_package("freerdp")
+        'freerdp3'
+        """
+        # Debian calls the source package freerdp3; the patch table uses the
+        # logical name shared with Arch.
+        return "freerdp3" if package == "freerdp" else package
+
+    def install_packages(self, options: Options) -> None:
+        if options.desktop is not Desktop.KDE:
+            die("Debian Trixie is currently supported with KDE only")
+
+        self.enable_source_packages()
+
+        blocked = [
+            package
+            for package in self.blocked
+            if package != "snapd" and not (options.bluetooth and package in self.bluetooth_packages)
+        ]
+        write_root(
+            "/etc/apt/preferences.d/weaselway",
+            f"# {MARKER}: what the desktops recommend that does not work in WSL.\n"
+            f"Package: {' '.join(blocked)}\nPin: release *\nPin-Priority: -1\n",
+        )
+        self.apt_get("update")
+        self.apt_get("install", "-y", *self.packages(options))
+        # Mesa's current build requirements need backported headers. Selecting
+        # the source alone leaves dependencies pinned to stable's versions.
+        self.apt_get("build-dep", "-y", "-t", "trixie-backports", "mesa")
+
+    def enable_source_packages(self, directory: Path = Path("/etc/apt/sources.list.d")) -> None:
+        found = False
+        for sources in sorted(directory.glob("*.sources")):
+            content = sources.read_text()
+            updated = re.sub(
+                r"(?m)^(Types:[ \t]+)deb[ \t]*$",
+                r"\1deb deb-src",
+                content,
+            )
+            if re.search(r"(?m)^Types:[ \t]+[^\n]*\bdeb-src\b", updated):
+                found = True
+            if updated != content:
+                write_root(sources, updated)
+        if not found:
+            die(f"cannot enable source packages: no deb or deb-src entries in {directory}/*.sources")
 
 
 class Arch(Distro):
@@ -591,9 +669,14 @@ def detect_distro() -> Distro:
     ids = {release.get("ID", ""), *release.get("ID_LIKE", "").split()}
     if "ubuntu" in ids:
         return Ubuntu()
+    if release.get("ID") == "debian" and release.get("VERSION_CODENAME") == "trixie":
+        return DebianTrixie()
     if "arch" in ids:
         return Arch()
-    die(f"{release.get('PRETTY_NAME', 'this distro')} is not supported, only Ubuntu and Arch Linux (CachyOS)")
+    die(
+        f"{release.get('PRETTY_NAME', 'this distro')} is not supported, "
+        "only Ubuntu, Debian Trixie KDE and Arch Linux (CachyOS)"
+    )
 
 
 # --- shared steps ---------------------------------------------------------------

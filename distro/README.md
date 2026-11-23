@@ -1,10 +1,11 @@
-# Weaselway on Ubuntu, Arch Linux and CachyOS
+# Weaselway on Ubuntu, Debian, Arch Linux and CachyOS
 
-This guide installs weaselway into an Ubuntu 26.04, Arch Linux or CachyOS WSL
-distro instead of the NixOS image. You get GNOME, Plasma or Hyprland on the
-virtual display, shown on Windows by the same viewer. It is for people who
-want weaselway in a distro they already know, and who can wait for Mesa and
-the compositor to compile.
+This guide installs weaselway into an Ubuntu 26.04, Debian 13 (Trixie), Arch
+Linux or CachyOS WSL distro instead of the NixOS image. You get GNOME, Plasma
+or Hyprland on the virtual display, shown on Windows by the same viewer.
+Debian Trixie currently supports Plasma only. It is for people who want
+weaselway in a distro they already know, and who can wait for Mesa and the
+compositor to compile.
 
 [install.py](install.py) does all of the work. It takes the desktop and
 PipeWire (the audio server) from the distro and rebuilds the compositor
@@ -32,6 +33,19 @@ wsl --install Ubuntu-26.04
 
 Ubuntu asks for a user name and a password on the first start. The password
 is the one for `sudo`.
+
+**Debian 13 (Trixie)**, in PowerShell:
+
+```powershell
+wsl --install Debian
+```
+
+Debian asks for a user name and password on the first start. The password is
+the one for `sudo`. Ensure systemd is enabled in `/etc/wsl.conf` before
+running the installer. Keep `trixie-backports` enabled in your apt sources:
+Mesa's build dependencies need newer headers than Trixie's stable packages.
+The installer selects backports for Mesa's build dependencies without
+changing the system-wide apt default release.
 
 **Arch Linux**, in PowerShell:
 
@@ -65,7 +79,7 @@ wsl --install --from-file cachyos-<version>.wsl --name CachyOS
 Its first start creates a user with `sudo`. WSL always runs the Microsoft
 kernel, so `linux-cachyos` and its schedulers are not used.
 
-systemd is on by default in all three images. If you changed that, set
+systemd is on by default in these images. If you changed that, set
 `systemd=true` under `[boot]` in `/etc/wsl.conf` and run `wsl --shutdown`.
 
 ## 2. Run the install script
@@ -112,10 +126,14 @@ The script changes the system in these places:
   Mesa, which cannot use the GPU through dxgdrm. Ubuntu's `chromium` and
   `firefox` packages only install snaps. With `--flatpak`, install both from
   Flathub. Otherwise use another source of `.deb`s, such as Mozilla's apt
-  repository for Firefox. It also enables source packages (`deb-src`) in
-  `/etc/apt/sources.list.d/ubuntu.sources` for the build dependencies.
+  repository for Firefox. It also enables source packages (`deb-src`) in the
+  apt source file for the build dependencies.
 - It rebuilds the compositor package with weaselway's patches, see
-  [Patched packages](#patched-packages). On Arch it also rebuilds FreeRDP.
+  [Patched packages](#patched-packages). On Debian and Arch it also rebuilds
+  FreeRDP.
+- On Debian it enables source packages (`deb-src`) in the configured
+  `/etc/apt/sources.list.d/*.sources` files, including `0000debian.sources`,
+  for the build dependencies.
 - It installs Mesa to `/opt/weaselway/mesa` and puts that directory ahead of
   the distro's libraries with `/etc/ld.so.conf.d/00-weaselway-mesa.conf`. The
   distro's Mesa packages stay installed but are no longer used.
@@ -170,6 +188,10 @@ session, run `ww-start-session stop`.
 
 ## Desktops
 
+Debian Trixie's Plasma shares the clipboard with the Windows viewer through
+KWin's older `wlr-data-control` protocol. On an existing install, pull the
+latest changes and rerun the installer to update `weaselwayd`.
+
 **GNOME** has no lock screen here: gnome-shell only locks when GDM runs, and
 the script keeps GDM out. Lock Windows instead.
 
@@ -200,19 +222,19 @@ distro's packages, with the patches from [nix/](../nix):
   `journalctl --user -u weaselwayd -f`).
 - aquamarine and Hyprland: the backports that let Hyprland follow the size of
   the viewer's window.
-- FreeRDP, on Arch only: `freerdp-dsp-ffmpeg-pcm-s16.patch`. Arch's FreeRDP
-  uses FFmpeg for audio, which treats 16-bit PCM as unsigned, and audio and
-  the microphone are garbled without the patch. Ubuntu's FreeRDP is built
-  without FFmpeg.
+- FreeRDP, on Debian and Arch: `freerdp-dsp-ffmpeg-pcm-s16.patch`. Their
+  FreeRDP uses FFmpeg for audio, which treats 16-bit PCM as unsigned, and
+  audio and the microphone are garbled without the patch. Ubuntu's FreeRDP
+  is built without FFmpeg.
 
-On Ubuntu the script downloads the source package with `apt-get source`,
-applies the patches and builds the packages with `dpkg-buildpackage`; the
-version gets a `+weaselway1` suffix. On Arch it builds the package from Arch's
-PKGBUILD at the version in the repositories, applies the patches after Arch's
-own `prepare()`, and adds `.1` to the `pkgrel`. Either way the patched
-package sorts above the distro's, and a normal upgrade keeps it until the
-distro ships a newer version. After such an update, run the script again to
-rebuild the package.
+On Ubuntu and Debian the script downloads source packages with `apt-get
+source`, applies the patches and builds the packages with `dpkg-buildpackage`;
+the version gets a `+weaselway1` suffix. On Arch it builds the package from
+Arch's PKGBUILD at the version in the repositories, applies the patches after
+Arch's own `prepare()`, and adds `.1` to the `pkgrel`. Patched packages sort
+above the distro's, and a normal upgrade keeps them until the distro ships a
+newer version. After such an update, run the script again to rebuild the
+package.
 
 The patches are made for specific releases. When the distro moves to a
 release that has no backport yet, the script stops with an error that names
@@ -303,8 +325,8 @@ specific to this setup:
   should list `/opt/weaselway/mesa/lib` first.
 - `systemctl status weaselway-prep` reports when no module exists for the
   running kernel.
-- The patched packages have `+weaselway1` (Ubuntu) or a `pkgrel` ending in
-  `.1` (Arch) in their version: check with `dpkg -l | grep weaselway` or
+- The patched packages have `+weaselway1` (Ubuntu and Debian) or a `pkgrel`
+  ending in `.1` (Arch) in their version: check with `dpkg -l | grep weaselway` or
   `pacman -Q mutter kwin hyprland aquamarine freerdp`. Without it, a distro
   update replaced the package; run the script again.
 - In a Flatpak app on a `25.08` or `26.08` runtime,
