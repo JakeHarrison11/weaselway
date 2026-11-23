@@ -45,8 +45,8 @@ FLATPAK_BRANCHES: Final = ("25.08", "26.08")
 LIBEDIT_URL: Final = "https://thrysoee.dk/editline/libedit-20260512-3.1.tar.gz"
 LIBEDIT_SHA256: Final = "432d5e7ea8b0116dd39f2eca7bc11d0eed77faa6b77ea526ace89907c23ea4a0"
 
-# Built for every supported kernel by release-image.yml. Not pinned: the
-# modules depend on the kernel release only.
+# Published upstream for supported kernels; the modules depend on the kernel
+# release only.
 BLUETOOTH_URL: Final = "https://github.com/weaselway/weaselway/releases/latest/download/wsl-bluetooth-{kernel}.tar.gz"
 
 PREFIX: Final = Path("/opt/weaselway")

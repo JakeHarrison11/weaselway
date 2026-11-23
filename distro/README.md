@@ -193,10 +193,10 @@ session, run `ww-start-session stop`.
 
 ## Using a different dxgdrm build
 
-The installer defaults to the published single-output dxgdrm release. To use
-native multi-monitor mode, build this branch's module package on a machine
-with Nix, then package the files for the WSL kernel you want to use (replace
-`KERNEL` below with the target distro's `uname -r`):
+The published dxgdrm release supports multiple monitors. To use a different
+build, build the module package on a machine with Nix, then package the files
+for the WSL kernel you want to use (replace `KERNEL` below with the target
+distro's `uname -r`):
 
 ```sh
 nix build .#dxgdrm-all

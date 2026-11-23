@@ -77,6 +77,18 @@ class DebianPackageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "multiple candidates"):
                     builder.companion_packages(root)
 
+    def test_module_requires_matching_multi_output_driver(self):
+        with tempfile.TemporaryDirectory() as directory:
+            module = Path(directory) / "dxgdrm.ko"
+            module.write_bytes(b"render node and virtual display (%u outputs, first %ux%u)")
+            with patch.object(builder, "output", return_value="test-WSL2 SMP"):
+                builder.check_module(module, "test-WSL2")
+                with self.assertRaisesRegex(ValueError, "does not match"):
+                    builder.check_module(module, "other-WSL2")
+                module.write_bytes(b"single-output driver")
+                with self.assertRaisesRegex(ValueError, "lacks native multi-output"):
+                    builder.check_module(module, "test-WSL2")
+
     def test_removal_without_systemd_or_udev_tools(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

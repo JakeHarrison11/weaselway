@@ -111,7 +111,7 @@ The NixOS image takes everything from the flake.
 | Component | Source | Where it runs |
 |---|---|---|
 | mesa with the d3d12 changes | `weaselway/mesa`, branch `mesa-26.2.7-wsl` | user distro (`/run/opengl-driver`) |
-| dxgdrm kernel module | `weaselway/dxgdrm` flake with [multi-output patch](nix/dxgdrm-multi-output.patch) | user distro kernel, loaded from the store |
+| dxgdrm kernel module | `weaselway/dxgdrm` flake | user distro kernel, loaded from the store |
 | weaselwayd | [weaselwayd/](weaselwayd) in this repo | user distro, as a unit of the user manager |
 | mutter | nixpkgs, plus three patches (`nix/mutter-*.patch`) | user distro (gnome-shell links it) |
 | KWin (optional) | nixpkgs, plus a damage patch per release | user distro |
@@ -524,8 +524,8 @@ repository's version, patches the tree after Arch's own `prepare()` (`makepkg --
 records the version and the patches, so a rerun only rebuilds when either changed. Arch's FreeRDP
 links FFmpeg and gets `freerdp-dsp-ffmpeg-pcm-s16.patch` the same way; Ubuntu's does not link it.
 
-With `--bluetooth` the script installs the Bluetooth modules from `nix/bluetooth-modules.nix`,
-which `release-image.yml` attaches to every release as `wsl-bluetooth-<kernel>.tar.gz`, and loads
+With `--bluetooth` the script installs the upstream Bluetooth release modules as
+`wsl-bluetooth-<kernel>.tar.gz`, and loads
 them with `weaselway-bluetooth.service` like the NixOS module does.
 
 With `--flatpak` the script builds the same Mesa a second time in each `org.freedesktop.Sdk`
@@ -599,54 +599,9 @@ The shell tests are not part of the build. They need mutter or KWin, D-Bus and, 
 
 ## CI
 
-[build-image.yml](.github/workflows/build-image.yml) runs on pushes to `main` and on pull requests.
-[release-image.yml](.github/workflows/release-image.yml) runs on `v*` tags and attaches
-`nixos-weaselway-gnome-<tag>.wsl` and `nixos-weaselway-plasma-<tag>.wsl` to the release. Both use
-the composite action [.github/actions/build-image](.github/actions/build-image) on the
-`ubuntu-26.04` runner, once per desktop, and set up Nix and Cachix with
-[.github/actions/setup-nix](.github/actions/setup-nix). actionlint does not know the runner label
-yet, but it exists.
-
-- Before the images, build-image.yml builds what cache.nixos.org lacks in one job per part: the
-  kernel trees with dxgdrm, the Windows viewer, mesa with weaselwayd's freerdp, and the patched
-  GNOME and Plasma packages. Each pushes to Cachix, and the image jobs only download them. Hydra
-  does not build the mingw cross toolchain the viewer needs, so a nixpkgs bump that changes stdenv
-  (the November glibc update did) compiles it again, which takes about an hour.
-- The images of a build run are kept as artifacts for one day, the shortest GitHub allows.
-- The `unstable` jobs build the same two systems on `nixpkgs-unstable`
-  (`nixosConfigurations.wsl-*-unstable`), only to fill the cache: they are not packed, kept or
-  released. The viewer and NixOS-WSL follow the stable `nixpkgs`, and dxgdrm's kernel trees come
-  from wsl-kernel with a nixpkgs of their own, so both channels share them
-  ([ADR 0032](docs/adr/0032-stable-and-unstable-nixpkgs.md)). Updating `nixpkgs` does not rebuild
-  the kernel trees.
-- The `hyprland` jobs build Hyprland with the patched aquamarine on both channels. No image has
-  Hyprland, so these jobs are what notices when a nixpkgs update breaks those patches
-  ([ADR 0030](docs/adr/0030-hyprland-follows-the-window-size.md)).
-- [update-nixpkgs.yml](.github/workflows/update-nixpkgs.yml) runs `nix flake update nixpkgs` on
-  Fridays and `nix flake update nixpkgs-unstable` on Saturdays, calls build-image.yml with the
-  new lock, and commits the lock to `main` only if that build passes. The push uses
-  `GITHUB_TOKEN`, so it starts no further build.
-- [distro-install.yml](.github/workflows/distro-install.yml) runs `distro/install.py` with
-  `--quick-build` (no optimization) in fresh Ubuntu 26.04 and Arch Linux distros, once per
-  desktop, on `windows-2025` runners, restarts WSL and checks what the script set up.
-  It runs on pushes to `main` that change what the script installs. The runner has no GPU, so it
-  tests the install and the preparation at boot, not a session on the viewer.
-- The release workflow builds the two images in separate jobs and creates the release in a third,
-  so a release is never published with only one of them.
-- The images of v1.7.1 are 1.3 GiB (GNOME) and 1.7 GiB (Plasma). GitHub limits release assets to
-  2 GiB, so check the closure size after changes: the kernel tree, the kernel toolchain or Orca's
-  voices each add hundreds of MB when they end up in the closure again.
-- The workflows push every path they build, except separate `-debug` outputs, to
-  weaselway.cachix.org with `cachix/cachix-action`. The token is the `CACHIX_AUTH_TOKEN` secret,
-  which is passed to the composite action as an input because composite actions cannot read
-  secrets. A run with an empty cache took about 45 minutes. With a warm cache only the changed
-  packages are compiled. Pull requests from forks receive no secrets and only read from the cache.
-- The module configures the same cache as a substituter, so `nixos-rebuild` on a WSL machine
-  downloads these paths too. An installation that predates this setting gets it with its first
-  rebuild after updating. That rebuild still compiles everything unless it is run with
-  `--option extra-substituters https://weaselway.cachix.org --option extra-trusted-public-keys <key>`.
-- Cachix's free tier has limited storage and evicts the least recently used paths first. The kernel
-  tree is the largest item.
+[debian-package.yml](.github/workflows/debian-package.yml) runs the distro tests and builds the
+Debian 13 bundle in WSL on a Windows runner. The bundle is uploaded as a workflow artifact and is
+tied to the runner's WSL kernel. See [the Debian package guide](distro/debian/README.md).
 
 ## Debugging
 

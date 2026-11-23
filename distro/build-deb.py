@@ -20,7 +20,7 @@ COMPANIONS = (
     "libfreerdp3-3", "libfreerdp-server3-3", "libwinpr3-3", "libwayland-client0",
 )
 VIEWER_NOTICES = {
-    "FreeRDP": ("weaselway/freerdp/0074147b8dfabb818169e9b83318ffd4af675caf", "LICENSE"),
+    "FreeRDP": ("weaselway/freerdp/v1.3.0", "LICENSE"),
     "SDL3": ("libsdl-org/SDL/release-3.4.14", "LICENSE.txt"),
     "SDL3_ttf": ("libsdl-org/SDL_ttf/release-3.2.2", "LICENSE.txt"),
     "OpenSSL": ("openssl/openssl/openssl-3.6.3", "LICENSE.txt"),
@@ -67,6 +67,14 @@ def companion_packages(directory):
     if missing:
         raise ValueError("missing bundled Debian packages: " + ", ".join(sorted(missing)))
     return result
+
+
+def check_module(module, kernel):
+    if output("modinfo", "-F", "vermagic", str(module)).split()[0] != kernel:
+        raise ValueError("dxgdrm.ko does not match the running WSL kernel")
+    # The released multi-output driver logs this message during probe.
+    if b"render node and virtual display (%u outputs, first %ux%u)" not in module.read_bytes():
+        raise ValueError("dxgdrm.ko lacks native multi-output support")
 
 
 def stage_runtime(root, prefix, kernel):
@@ -179,17 +187,13 @@ def build(args):
     build_info = (
         f"kernel={kernel}\narchitecture=amd64\ndistribution=debian-13\n"
         f"weaselway_commit={output('git', '-C', str(REPO), 'rev-parse', 'HEAD')}\n"
-        "mesa_source=https://github.com/weaselway/mesa/tree/45d061df2d597e0c037616013cc29bacece29395\n"
-        "viewer_source=https://github.com/weaselway/freerdp/tree/0074147b8dfabb818169e9b83318ffd4af675caf\n"
-        "dxgdrm_source=https://github.com/weaselway/dxgdrm/tree/5798598a64ae33f3913f11eaf9684a46ed452302\n"
-        "dxgdrm_patch=nix/dxgdrm-multi-output.patch\n"
+        "mesa_source=https://github.com/weaselway/mesa/tree/8aa6a89c3da6bc894f8baff96320be5150169fcf\n"
+        "viewer_source=https://github.com/weaselway/freerdp/tree/v1.3.0\n"
+        "dxgdrm_source=https://github.com/weaselway/dxgdrm/tree/v1.4.0\n"
         f"kernel_source=https://github.com/microsoft/WSL2-Linux-Kernel/tree/linux-msft-wsl-{kernel.split('-')[0]}\n"
     )
     module = args.prefix / "dxgdrm/lib/modules" / kernel / "extra/dxgdrm.ko"
-    if output("modinfo", "-F", "vermagic", str(module)).split()[0] != kernel:
-        raise ValueError("dxgdrm.ko does not match the running WSL kernel")
-    if "dxgdrm_set_outputs_ioctl" not in output("nm", str(module)):
-        raise ValueError("dxgdrm.ko lacks native multi-output support")
+    check_module(module, kernel)
     companions = companion_packages(args.packages)
     destination = args.output.resolve()
     destination.mkdir(parents=True, exist_ok=False)

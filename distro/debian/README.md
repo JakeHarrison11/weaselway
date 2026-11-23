@@ -72,10 +72,9 @@ settings are not deleted.
 
 ## Building another bundle
 
-On a Debian 13 build machine, first build and install the matching stack with
-the source installer. Supply a native multi-output module archive as described
-in the parent distro README; stock release modules are single-output.
-Then build the daemon from the desired checkout and run:
+On a Debian 13 WSL build machine, first build and install the matching stack
+with the source installer. The default dxgdrm release supports multiple
+outputs. Then build the daemon from the desired checkout and run:
 
 ```sh
 make -C weaselwayd DXGDRM_INCLUDE="$HOME/.cache/weaselway-build"
@@ -98,7 +97,7 @@ pushes to `main`, pull requests that touch package inputs, or when run manually.
 Download the `weaselway-debian13-<commit>` artifact from the workflow run.
 
 Source: <https://github.com/JakeHarrison11/weaselway> (revision in `BUILD-INFO`).
-Mesa and Windows viewer revisions are pinned in `distro/install.py`; driver
-source changes are in `nix/dxgdrm-multi-output.patch`. Companion Debian packages
-retain their copyright metadata. Anyone redistributing the binary bundle must
-also satisfy the source-distribution obligations of its included components.
+Mesa, the viewer and the driver are pinned in `distro/install.py`. Companion
+Debian packages retain their copyright metadata. Anyone redistributing the
+binary bundle must also satisfy the source-distribution obligations of its
+included components.

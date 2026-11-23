@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
     paths:
-      - .github/actions/setup-nix/**
       - .github/workflows/debian-package.yml
       - bin/**
       - distro/**
@@ -18,7 +17,6 @@ on:
       - LICENSE
   pull_request:
     paths:
-      - .github/actions/setup-nix/**
       - .github/workflows/debian-package.yml
       - bin/**
       - distro/**
@@ -40,37 +38,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  dxgdrm:
+  test:
     runs-on: ubuntu-26.04
-    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - uses: ./.github/actions/setup-nix
-        with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Test Debian package helpers
-        run: python3 distro/test_debian.py
-
-      - name: Build the multi-output WSL driver
-        run: |
-          nix build --print-build-logs --out-link dxgdrm .#dxgdrm-all
-          tar -chzf dxgdrm-multi-output.tar.gz -C dxgdrm \
-            lib/modules lib/udev/rules.d/99-dxgdrm.rules
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: dxgdrm-multi-output
-          path: dxgdrm-multi-output.tar.gz
-          retention-days: 1
-          if-no-files-found: error
-          compression-level: 0
+        run: python3 -m unittest discover -s distro -p 'test_*.py'
 
   package:
-    needs: dxgdrm
+    needs: test
     runs-on: windows-2025
     timeout-minutes: 360
     env:
@@ -83,12 +60,6 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: dxgdrm-multi-output
-
       - name: Update WSL
         run: |
           for i in 1 2 3 4; do wsl --update --web-download && break; [ $i = 4 ] && exit 1; sleep $((i * 30)); done
@@ -123,18 +94,14 @@ jobs:
         run: |
           WIN_WORKSPACE="$(cygpath -w "${GITHUB_WORKSPACE}")"
           WSL_WORKSPACE="$(wsl -d "${DISTRO}" -- wslpath -u "${WIN_WORKSPACE}")"
-          WSL_DRIVER="$(wsl -d "${DISTRO}" -- wslpath -u "${WIN_WORKSPACE}\\dxgdrm-multi-output.tar.gz")"
           wsl -d "${DISTRO}" --cd '~' -- env \
             SOURCE_REPOSITORY="${SOURCE_REPOSITORY}" \
             SOURCE_SHA="${SOURCE_SHA}" \
             WSL_WORKSPACE="${WSL_WORKSPACE}" \
-            WSL_DRIVER="${WSL_DRIVER}" \
             bash -euxs <<'EOF'
           git clone --quiet "https://github.com/${SOURCE_REPOSITORY}.git" weaselway
           git -C weaselway checkout --quiet "${SOURCE_SHA}"
-          tar -tzf "${WSL_DRIVER}" | grep -Fx "lib/modules/$(uname -r)/extra/dxgdrm.ko"
-          ./weaselway/distro/install.py --desktop kde --no-flatpak --no-bluetooth \
-            --dxgdrm-archive "${WSL_DRIVER}"
+          ./weaselway/distro/install.py --desktop kde --no-flatpak --no-bluetooth
           mkdir -p "$HOME/.cache/weaselway-build/packages"
           cd "$HOME/.cache/weaselway-build/packages"
           apt-get download libwayland-client0/trixie-backports

@@ -1,7 +1,7 @@
 # Weaselway
 
 [![Release](https://img.shields.io/github/v/release/weaselway/weaselway?include_prereleases)](https://github.com/weaselway/weaselway/releases)
-[![Build](https://img.shields.io/github/actions/workflow/status/weaselway/weaselway/build-image.yml?branch=main)](https://github.com/weaselway/weaselway/actions/workflows/build-image.yml)
+[![Debian build](https://img.shields.io/github/actions/workflow/status/JakeHarrison11/weaselway/debian-package.yml?branch=main)](https://github.com/JakeHarrison11/weaselway/actions/workflows/debian-package.yml)
 [![License](https://img.shields.io/github/license/weaselway/weaselway)](LICENSE)
 [![Discord](https://img.shields.io/badge/Discord-Join%20the%20chat-5865F2?logo=discord&logoColor=white)](https://discord.gg/6HG8ac8XWZ)
 
@@ -93,9 +93,8 @@ its patched dependencies, tied to the exact WSL kernel it was built for.
 1. Download `nixos-weaselway-gnome-<version>.wsl` or
    `nixos-weaselway-plasma-<version>.wsl` from the
    [latest release](https://github.com/weaselway/weaselway/releases/latest).
-   The two differ only in the desktop they carry. Each CI run also uploads
-   both as the artifacts `nixos-wsl-<desktop>-<commit>`, which are kept for a
-   day. To build one yourself, see [Building](ARCHITECTURE.md#building).
+   The two differ only in the desktop they carry. To build one yourself, see
+   [Building](ARCHITECTURE.md#building).
 
 2. Import it in PowerShell:
 
