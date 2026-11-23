@@ -93,6 +93,10 @@ The package directory must also contain `libwayland-client0` from Trixie
 backports (`apt download libwayland-client0/trixie-backports`): apt does not
 automatically select a backport to satisfy the newer Mesa's minimum version.
 
+The **Build Debian WSL package** GitHub Actions workflow builds the bundle on
+pushes to `main`, pull requests that touch package inputs, or when run manually.
+Download the `weaselway-debian13-<commit>` artifact from the workflow run.
+
 Source: <https://github.com/JakeHarrison11/weaselway> (revision in `BUILD-INFO`).
 Mesa and Windows viewer revisions are pinned in `distro/install.py`; driver
 source changes are in `nix/dxgdrm-multi-output.patch`. Companion Debian packages
