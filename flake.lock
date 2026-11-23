@@ -10,11 +10,11 @@
         "wsl-kernel": "wsl-kernel"
       },
       "locked": {
-        "lastModified": 1794300005,
-        "narHash": "sha256-9tvdoy8FTB6A6tRKYaiVabv9Z5XHe8OEWUUKLhPUVvI=",
+        "lastModified": 1794952133,
+        "narHash": "sha256-IGZtWiJu7FebXo84wolhc2hTh3ejbarqggStQwsDtQA=",
         "owner": "weaselway",
         "repo": "dxgdrm",
-        "rev": "5798598a64ae33f3913f11eaf9684a46ed452302",
+        "rev": "87ad880c095f8b481f37f9624df8b0e24c1e7535",
         "type": "github"
       },
       "original": {
@@ -46,10 +46,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1793791763,
-        "narHash": "sha256-Myh4yBAW1cey+2CoHpFDkQMbFgQhfvuqVrSHwlS0uoo=",
+        "lastModified": 1795257574,
+        "narHash": "sha256-eMX73qms6CNS25oaj/GX0oBdDsIZn3be7rvxb/8Fd5o=",
         "ref": "main",
-        "rev": "0074147b8dfabb818169e9b83318ffd4af675caf",
+        "rev": "05ec5f1c24cc04dfd096823a754ebfb5a481544a",
         "shallow": true,
         "type": "git",
         "url": "https://github.com/weaselway/freerdp"
@@ -100,11 +100,11 @@
     },
     "nixpkgs-unstable": {
       "locked": {
-        "lastModified": 1794386569,
-        "narHash": "sha256-x9sADJvoVG0L6RejZB+/BB4YiGZFBZrfTlhF4uBq1tQ=",
+        "lastModified": 1795085501,
+        "narHash": "sha256-S5keGWzaKpuXo9MNoIC2FfTIuTyTnx8P4NhYJMEsTLI=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "d4f25a3e562008648d45bcf2d70bcc7422cad84e",
+        "rev": "0bb8272318b4ca41bf0edc6224df3e3e3046b70d",
         "type": "github"
       },
       "original": {
