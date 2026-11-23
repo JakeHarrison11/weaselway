@@ -45,13 +45,15 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Test Debian package helpers
-        run: python3 -m unittest distro.test_debian
+        run: python3 distro/test_debian.py
 
       - name: Build the multi-output WSL driver
         run: |
@@ -130,15 +132,9 @@ jobs:
             bash -euxs <<'EOF'
           git clone --quiet "https://github.com/${SOURCE_REPOSITORY}.git" weaselway
           git -C weaselway checkout --quiet "${SOURCE_SHA}"
-          cat > /etc/apt/sources.list.d/trixie-backports.sources <<'SOURCES'
-          Types: deb deb-src
-          URIs: http://deb.debian.org/debian
-          Suites: trixie-backports
-          Components: main
-          Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-          SOURCES
+          tar -tzf "${WSL_DRIVER}" | grep -Fx "lib/modules/$(uname -r)/extra/dxgdrm.ko"
           ./weaselway/distro/install.py --desktop kde --no-flatpak --no-bluetooth \
-            --quick-build --dxgdrm-archive "${WSL_DRIVER}"
+            --dxgdrm-archive "${WSL_DRIVER}"
           mkdir -p "$HOME/.cache/weaselway-build/packages"
           cd "$HOME/.cache/weaselway-build/packages"
           apt-get download libwayland-client0/trixie-backports
