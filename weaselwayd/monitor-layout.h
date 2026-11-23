@@ -11,8 +11,8 @@
 
 #define WEASELWAY_MAX_DESKTOP_DIMENSION 8192
 
-/* Keep the primary output first; normalize the rectangles to the desktop origin. */
-bool monitor_layout_parse(const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *pdu, struct rdp_layout *layout);
-bool monitor_layout_from_client(const rdpMonitor *monitors, unsigned count, struct rdp_layout *layout);
+/* Validate a client layout and normalize its rectangles to the desktop origin. */
+bool monitor_layout_parse(const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *pdu,
+                          struct monitor monitors[RDP_MAX_OUTPUTS], int *count);
 
 #endif

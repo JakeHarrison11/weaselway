@@ -1,12 +1,13 @@
 #include "monitor-layout.h"
 
 bool
-monitor_layout_parse(const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *pdu, struct rdp_layout *layout)
+monitor_layout_parse(const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *pdu,
+                     struct monitor monitors[RDP_MAX_OUTPUTS], int *count)
 {
     int64_t left = INT64_MAX, top = INT64_MAX, right = INT64_MIN, bottom = INT64_MIN;
-    unsigned primary = 0;
 
-    if (!pdu->Monitors || pdu->NumMonitors == 0 || pdu->NumMonitors > RDP_MAX_OUTPUTS)
+    if (!pdu || !pdu->Monitors || !monitors || !count || pdu->NumMonitors == 0 ||
+        pdu->NumMonitors > RDP_MAX_OUTPUTS)
         return false;
 
     for (unsigned i = 0; i < pdu->NumMonitors; i++) {
@@ -14,10 +15,10 @@ monitor_layout_parse(const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *pdu, struct rdp_l
         int64_t monitor_right = (int64_t)monitor->Left + monitor->Width;
         int64_t monitor_bottom = (int64_t)monitor->Top + monitor->Height;
 
-        if (monitor->Width == 0 || monitor->Height == 0)
+        if (monitor->Width == 0 || monitor->Height == 0 ||
+            monitor->Width > WEASELWAY_MAX_DESKTOP_DIMENSION ||
+            monitor->Height > WEASELWAY_MAX_DESKTOP_DIMENSION)
             return false;
-        if (monitor->Flags & DISPLAY_CONTROL_MONITOR_PRIMARY)
-            primary = i;
         if (monitor->Left < left)
             left = monitor->Left;
         if (monitor->Top < top)
@@ -33,47 +34,30 @@ monitor_layout_parse(const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *pdu, struct rdp_l
         bottom - top > WEASELWAY_MAX_DESKTOP_DIMENSION)
         return false;
 
-    *layout = (struct rdp_layout) {
-        .count = pdu->NumMonitors,
-        .width = (int)(right - left),
-        .height = (int)(bottom - top),
-    };
-    for (unsigned i = 0; i < layout->count; i++) {
+    *count = (int)pdu->NumMonitors;
+    for (unsigned i = 0; i < pdu->NumMonitors; i++) {
         const DISPLAY_CONTROL_MONITOR_LAYOUT *m = &pdu->Monitors[i];
-        unsigned slot = i == primary ? 0 : i < primary ? i + 1 : i;
-        struct rdp_rect rect = { (int)(m->Left - left), (int)(m->Top - top),
-                                 (int)m->Width, (int)m->Height };
+        struct monitor current = {
+            .x = (int)((int64_t)m->Left - left),
+            .y = (int)((int64_t)m->Top - top),
+            .width = (int)m->Width,
+            .height = (int)m->Height,
+            .width_mm = m->PhysicalWidth >= 10 && m->PhysicalWidth <= 10000
+                            ? m->PhysicalWidth
+                            : 0,
+            .height_mm = m->PhysicalHeight >= 10 && m->PhysicalHeight <= 10000
+                             ? m->PhysicalHeight
+                             : 0,
+        };
 
         for (unsigned j = 0; j < i; j++) {
-            unsigned previous = j == primary ? 0 : j < primary ? j + 1 : j;
-            const struct rdp_rect *r = &layout->outputs[previous];
+            const struct monitor *r = &monitors[j];
 
-            if (rect.x < r->x + r->width && r->x < rect.x + rect.width &&
-                rect.y < r->y + r->height && r->y < rect.y + rect.height)
+            if (current.x < r->x + r->width && r->x < current.x + current.width &&
+                current.y < r->y + r->height && r->y < current.y + current.height)
                 return false;
         }
-        layout->outputs[slot] = rect;
+        monitors[i] = current;
     }
     return true;
-}
-
-bool
-monitor_layout_from_client(const rdpMonitor *monitors, unsigned count, struct rdp_layout *layout)
-{
-    DISPLAY_CONTROL_MONITOR_LAYOUT rectangles[RDP_MAX_OUTPUTS] = { 0 };
-    DISPLAY_CONTROL_MONITOR_LAYOUT_PDU pdu = { .NumMonitors = count, .Monitors = rectangles };
-
-    if (!monitors || count < 2 || count > RDP_MAX_OUTPUTS)
-        return false;
-
-    for (unsigned i = 0; i < count; i++) {
-        const rdpMonitor *m = &monitors[i];
-        if (m->width <= 0 || m->height <= 0)
-            return false;
-        rectangles[i] = (DISPLAY_CONTROL_MONITOR_LAYOUT) {
-            .Flags = m->is_primary ? DISPLAY_CONTROL_MONITOR_PRIMARY : 0,
-            .Left = m->x, .Top = m->y, .Width = (UINT32)m->width, .Height = (UINT32)m->height,
-        };
-    }
-    return monitor_layout_parse(&pdu, layout);
 }

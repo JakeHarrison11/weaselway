@@ -5,6 +5,7 @@
 /weaselwayd/gfxredir/*.o
 /weaselwayd/tests/test-formats
 /weaselwayd/tests/test-monitor-layout
+/weaselwayd/tests/test-layout
 /weaselwayd/tests/selection-tool
 /weaselwayd/tests/rdp-harness
 /weaselwayd/tests/egl-load
@@ -14,3 +15,8 @@
 /weaselwayd/ext-data-control-v1-protocol.c
 /weaselwayd/wlr-data-control-unstable-v1-client-protocol.h
 /weaselwayd/wlr-data-control-unstable-v1-protocol.c
+/weaselwayd/xdg-output-unstable-v1-client-protocol.h
+/weaselwayd/xdg-output-unstable-v1-protocol.c
+
+# Written by Python, for example by `python3 -m doctest distro/install.py`.
+__pycache__/

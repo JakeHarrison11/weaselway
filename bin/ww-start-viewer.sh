@@ -19,6 +19,30 @@ list_monitors() {
     fi
 }
 
+# WEASELWAY_VIEWER_COPY_TO=/mnt/c/some/dir runs a copy from a Windows directory
+# instead, one subdirectory per viewer build, named after its store hash.
+# A copy that is there is never replaced: the hash changes with the build.
+if [ -n "${WEASELWAY_VIEWER_COPY_TO:-}" ]; then
+    BUILD="${VIEWER#/nix/store/}"
+    if [ "${BUILD}" = "${VIEWER}" ]; then
+        echo "error: WEASELWAY_VIEWER_COPY_TO needs a viewer in /nix/store, not ${VIEWER}" >&2
+        exit 1
+    fi
+    TARGET="${WEASELWAY_VIEWER_COPY_TO}/${BUILD%%-*}"
+    if [ ! -e "${TARGET}" ]; then
+        # Copy next to it and rename, so a copy cut short is never used.
+        mkdir -p "${WEASELWAY_VIEWER_COPY_TO}"
+        TMP="$(mktemp -d "${TARGET}.XXXXXX")"
+        cp -r "${VIEWER%/*}"/. "${TMP}"
+        # Store files are read-only, which Windows turns into the read-only
+        # attribute; old builds should be easy to delete.
+        chmod -R u+w "${TMP}"
+        # Another start may have won the race; then use its copy.
+        mv -T "${TMP}" "${TARGET}" 2> /dev/null || rm -rf "${TMP}"
+    fi
+    VIEWER="${TARGET}/${VIEWER##*/}"
+fi
+
 if [ "${1:-}" = --list-monitors ]; then
     list_monitors
     exit 0
@@ -91,7 +115,7 @@ COMMAND=(
     "${VIEWER}" /u:dummy /d:dummy /p:dummy
     /v:vsock://"${VM_ID}":"${PORT}"
     /wslgsharedmemorypath:"${SHARED_MEMORY_PATH}"
-    /cert:ignore
+    /sec:rdp
     /dynamic-resolution
     /w:1280
     /log-level:warn

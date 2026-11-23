@@ -34,9 +34,9 @@ from pathlib import Path
 from typing import Final, NoReturn
 
 # The versions the NixOS image ships (flake.lock, nix/overlay.nix).
-DXGDRM_VERSION: Final = "v1.3.2"
-VIEWER_VERSION: Final = "v1.2.0"
-MESA_REV: Final = "45d061df2d597e0c037616013cc29bacece29395"  # branch mesa-26.2.7-wsl
+DXGDRM_VERSION: Final = "v1.4.0"
+VIEWER_VERSION: Final = "v1.3.0"
+MESA_REV: Final = "8aa6a89c3da6bc894f8baff96320be5150169fcf"  # branch mesa-26.2.7-wsl
 
 # The runtime branches the Flatpak GL extension is built for; apps on other
 # branches get the runtime's own Mesa.
@@ -259,7 +259,16 @@ class Backport:
 BACKPORTS: Final[Mapping[str, Sequence[Backport]]] = {
     # The overview keeps its old size when the viewer resizes the display, and a
     # failed device open closed fd 0, which hung GNOME when WSL's vgem came back.
-    "mutter": [Backport((50,), (52,), ("mutter-stage-relayout.patch", "mutter-kms-fd0.patch"))],
+    # From 50.4 on, each monitor's viewport stays inside its framebuffer, which
+    # Intel Gen9 GPUs need with several monitors; older releases lack the helper.
+    "mutter": [
+        Backport((50,), (50, 4), ("mutter-stage-relayout.patch", "mutter-kms-fd0.patch")),
+        Backport(
+            (50, 4),
+            (52,),
+            ("mutter-stage-relayout.patch", "mutter-kms-fd0.patch", "mutter-viewport-in-fb.patch"),
+        ),
+    ],
     # KWin reports its damage (FB_DAMAGE_CLIPS), so weaselwayd does not read back
     # the whole screen every frame.
     "kwin": [
@@ -300,6 +309,10 @@ def backport_patches(package: str, version: str) -> list[Path]:
     >>> backport_patches("kwin", "6.4.0")  # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
     InstallError: weaselway has no patch for kwin 6.4.0 yet
+    >>> [p.name for p in backport_patches("mutter", "50.3-0ubuntu1")]
+    ['mutter-stage-relayout.patch', 'mutter-kms-fd0.patch']
+    >>> [p.name for p in backport_patches("mutter", "51.0-1")][-1]
+    'mutter-viewport-in-fb.patch'
     >>> [p.name for p in backport_patches("aquamarine", "0.16.0")]
     ['aquamarine-0.11-mode-changes.patch']
     >>> backport_patches("kwin", "6.9.0")  # doctest: +IGNORE_EXCEPTION_DETAIL
@@ -393,7 +406,7 @@ class Ubuntu(Distro):
     freerdp_uses_ffmpeg = False
     base_packages = (
         "pipewire-pulse", "wireplumber", "upower", "mesa-utils", "vulkan-tools", "kbd", "curl", "git", "unzip",
-        "build-essential", "pkg-config", "freerdp3-dev", "libwinpr3-dev", "libssl-dev", "libglib2.0-dev",
+        "build-essential", "pkg-config", "freerdp3-dev", "libwinpr3-dev", "libglib2.0-dev",
         "libpng-dev", "libwayland-dev", "wayland-protocols", "libgbm-dev", "libdrm-dev", "libegl-dev",
         "libgles-dev",
     )  # fmt: skip
@@ -566,7 +579,7 @@ class Arch(Distro):
     # freerdp is not listed: the patched package is built from Arch's PKGBUILD,
     # and asking for the repository's would replace it.
     base_packages = (
-        "pipewire", "pipewire-pulse", "wireplumber", "upower", "glib2", "openssl", "libpng", "libdrm", "libglvnd", "mesa",
+        "pipewire", "pipewire-pulse", "wireplumber", "upower", "glib2", "libpng", "libdrm", "libglvnd", "mesa",
         "wayland", "wayland-protocols", "vulkan-icd-loader", "mesa-utils", "vulkan-tools", "libva", "kbd", "kmod",
         "base-devel", "git", "curl", "unzip",
         # Mesa's build dependencies, from Arch's mesa PKGBUILD without what

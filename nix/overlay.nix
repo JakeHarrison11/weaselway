@@ -15,25 +15,25 @@ let
   # from src would be import-from-derivation.
   mesaFork =
     if lib.versions.majorMinor prev.mesa.version == "26.3" then
-      # branch mesa-26.3.0-wsl
+      # branch mesa-26.3.1-wsl
       {
-        version = "26.3.0";
-        rev = "2517e97bef0d73155e4caaf3153a50a1b21df2ca";
-        hash = "sha256-6mbnhrJ59a4zgec0xP4VeupzVFBCvGeQ0waCQMaxfRc=";
+        version = "26.3.1";
+        rev = "e0835fee09582b1c520a4287c674408a3131f77d";
+        hash = "sha256-bb7UhUhHf++edjLML2FSdNmv8kxR4tA7wX2FYGv6EyU=";
       }
     else if lib.versionOlder prev.mesa.version "27" then
       # branch mesa-26.2.7-wsl
       {
         version = "26.2.7";
-        rev = "45d061df2d597e0c037616013cc29bacece29395";
-        hash = "sha256-HU4r4Ajj83UaLPjZaJQImJfe1W15mDGqpRPxcq2IRnA=";
+        rev = "8aa6a89c3da6bc894f8baff96320be5150169fcf";
+        hash = "sha256-F8+xDmmtWEt0kITW4nz4lUfBaAhBaZWJfIpmGvl4IM8=";
       }
     else
       # branch main
       {
         version = "27.0.0-devel";
-        rev = "326919afc3e728ecd84505765ab4d32fd18bc645";
-        hash = "sha256-G4GLA5pT7SKVz9+uRZQuubnC1ZKymNgj9kkztcqaipY=";
+        rev = "0e48f5ae5ab09396f702a8e5ea56917e631bb85d";
+        hash = "sha256-038I/rs1LcU7ko5pThtdPEFb97LUWMk0K3yOQaF4jR4=";
       };
 
   mesaDrivers = {
@@ -106,6 +106,13 @@ in
       (builtins.path {
         name = "mutter-kms-fd0.patch";
         path = ./mutter-kms-fd0.patch;
+      })
+      # With 2+ monitors every view but the last had a viewport past its
+      # framebuffer; Intel Gen9's D3D12 driver squeezes such stencil-clipped
+      # draws, leaving trails while dragging windows.
+      (builtins.path {
+        name = "mutter-viewport-in-fb.patch";
+        path = ./mutter-viewport-in-fb.patch;
       })
     ];
   });
@@ -183,7 +190,6 @@ in
       final.libgbm
       final.libdrm
       final.weaselway-freerdp
-      final.openssl
       final.glib
       final.libpng
       final.wayland
