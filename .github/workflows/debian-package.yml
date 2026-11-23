@@ -94,7 +94,25 @@ jobs:
             bash -euxs <<'EOF'
           git clone --quiet "https://github.com/${SOURCE_REPOSITORY}.git" weaselway
           git -C weaselway checkout --quiet "${SOURCE_SHA}"
-          ./weaselway/distro/install.py --desktop kde --no-flatpak --no-bluetooth
+          # KWin's parallel C++ compilation can exhaust the WSL VM's memory.
+          # Keep the optimized build, but limit concurrency and log resources.
+          (
+            set +e
+            while :; do
+              echo "=== Build resources: $(date -u) ==="
+              free -m
+              df -h "$HOME"
+              cat /proc/pressure/memory
+              ps -eo state,pid,ppid,pcpu,pmem,rss,comm --sort=-rss | head -n 12
+              sleep 120 >/dev/null 2>&1
+            done
+          ) &
+          monitor=$!
+          trap 'kill "$monitor" 2>/dev/null || true' EXIT
+          ./weaselway/distro/install.py --desktop kde --no-flatpak --no-bluetooth --jobs 2
+          kill "$monitor"
+          wait "$monitor" 2>/dev/null || true
+          trap - EXIT
           mkdir -p "$HOME/.cache/weaselway-build/packages"
           cd "$HOME/.cache/weaselway-build/packages"
           apt-get download libwayland-client0/trixie-backports
