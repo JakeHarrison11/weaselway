@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+case "$1" in
+    remove|purge)
+        deb-systemd-helper disable weaselway-prep.service >/dev/null
+        if [ -d /run/systemd/system ] && command -v systemctl >/dev/null; then
+            systemctl daemon-reload
+        fi
+        if [ -S /run/udev/control ] && command -v udevadm >/dev/null; then
+            udevadm control --reload
+        fi
+        ;;
+esac
+if [ "$1" = purge ]; then
+    deb-systemd-helper purge weaselway-prep.service >/dev/null
+    rm -f /etc/systemd/user/weaselwayd.service.d/10-weaselway-user.conf
+    rm -f /etc/systemd/user/default.target.wants/weaselwayd.service
+fi

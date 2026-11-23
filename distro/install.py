@@ -149,6 +149,7 @@ class Options:
     bluetooth: bool
     jobs: int
     quick_build: bool
+    dxgdrm_archive: Path | None = None
 
 
 def ask(question: str, choices: Sequence[str], default: str) -> str:
@@ -193,6 +194,11 @@ def make_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="compile without optimization, for CI: faster to build, slower to run",
     )
+    parser.add_argument(
+        "--dxgdrm-archive",
+        type=Path,
+        help="install a trusted local dxgdrm module archive instead of the published release",
+    )
     return parser
 
 
@@ -208,6 +214,8 @@ def complete_options(parser: argparse.ArgumentParser, args: argparse.Namespace) 
         args.bluetooth = ask_bool("Install Bluetooth support for adapters attached with usbipd?")
     if args.jobs < 1:
         parser.error("--jobs must be at least 1")
+    if args.dxgdrm_archive and not args.dxgdrm_archive.is_file():
+        parser.error("--dxgdrm-archive must name an existing file")
 
     return Options(
         desktop=Desktop(args.desktop),
@@ -215,6 +223,7 @@ def complete_options(parser: argparse.ArgumentParser, args: argparse.Namespace) 
         bluetooth=args.bluetooth,
         jobs=args.jobs,
         quick_build=args.quick_build,
+        dxgdrm_archive=args.dxgdrm_archive,
     )
 
 
@@ -407,7 +416,7 @@ class Ubuntu(Distro):
             "gnome-text-editor", "gnome-backgrounds", "xdg-desktop-portal-gnome",
         ),
         Desktop.KDE: (
-            "plasma-desktop", "plasma-workspace", "kwin-wayland", "konsole", "dolphin", "xdg-desktop-portal-kde",
+            "plasma-desktop", "plasma-workspace", "kwin-wayland", "libkscreen-bin", "konsole", "dolphin", "xdg-desktop-portal-kde",
         ),
         Desktop.HYPRLAND: ("hyprland", "kitty", "xdg-desktop-portal-hyprland"),
     }  # fmt: skip
@@ -587,7 +596,7 @@ class Arch(Distro):
             "gnome-text-editor", "gnome-backgrounds", "gnome-keyring", "xdg-desktop-portal-gnome",
         ),
         Desktop.KDE: (
-            "plasma-desktop", "plasma-workspace", "plasma-integration", "kglobalacceld", "xdg-desktop-portal",
+            "plasma-desktop", "plasma-workspace", "plasma-integration", "libkscreen", "kglobalacceld", "xdg-desktop-portal",
             "xdg-desktop-portal-kde", "konsole", "dolphin",
         ),
         Desktop.HYPRLAND: ("hyprland", "kitty", "xdg-desktop-portal-hyprland"),
@@ -1038,13 +1047,17 @@ def install_bluetooth(options: Options) -> None:
 
 def download_releases(options: Options) -> None:
     # First, so that an unsupported kernel fails before anything is installed.
-    step(f"Downloading dxgdrm {DXGDRM_VERSION} for {KERNEL}")
-    base = f"https://github.com/weaselway/dxgdrm/releases/download/{DXGDRM_VERSION}"
-    download(
-        f"{base}/dxgdrm-{KERNEL}.tar.gz",
-        BUILD / "dxgdrm.tar.gz",
-        f"dxgdrm {DXGDRM_VERSION} has no module for the kernel {KERNEL}",
-    )
+    if options.dxgdrm_archive:
+        step(f"Using local dxgdrm archive: {options.dxgdrm_archive}")
+        shutil.copyfile(options.dxgdrm_archive, BUILD / "dxgdrm.tar.gz")
+    else:
+        step(f"Downloading dxgdrm {DXGDRM_VERSION} for {KERNEL}")
+        base = f"https://github.com/weaselway/dxgdrm/releases/download/{DXGDRM_VERSION}"
+        download(
+            f"{base}/dxgdrm-{KERNEL}.tar.gz",
+            BUILD / "dxgdrm.tar.gz",
+            f"dxgdrm {DXGDRM_VERSION} has no module for the kernel {KERNEL}",
+        )
     download(
         f"https://raw.githubusercontent.com/weaselway/dxgdrm/{DXGDRM_VERSION}/dxgdrm_drm.h",
         BUILD / "dxgdrm_drm.h",

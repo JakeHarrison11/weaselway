@@ -83,8 +83,10 @@ ww-start-viewer
 The release images are the quickest way in. To add weaselway to a NixOS-WSL
 system you already have, see
 [Into an existing NixOS-WSL system](#into-an-existing-nixos-wsl-system).
-[distro/README.md](distro/README.md) installs it into an Ubuntu, Arch Linux or
-CachyOS distro instead.
+[distro/README.md](distro/README.md) installs it into an Ubuntu, Debian, Arch
+Linux or CachyOS distro instead. For Debian 13 amd64, an installable
+[binary bundle](distro/debian/README.md) includes the multi-monitor stack and
+its patched dependencies, tied to the exact WSL kernel it was built for.
 
 ### From the image
 
@@ -407,6 +409,46 @@ deviates from the NixOS defaults in two places:
 `ww-start-viewer` appends its arguments to the `sdl-freerdp.exe` command line,
 so any FreeRDP option can be added or overridden for one run.
 
+To show the desktop across multiple Windows monitors, run
+`ww-start-viewer /multimon`. The Linux compositor sees up to four separate
+virtual outputs, and the viewer shows each output on its corresponding Windows
+monitor. On Plasma, Weaselway uses `kscreen-doctor` to match the Windows
+monitor positions on each connection. In other compositors, match the order
+and arrangement in your Linux display settings so the pointer moves between
+displays correctly. Use each virtual output's preferred mode without rotation
+or scaling. The combined width and
+height must each be at most 8192 pixels; use the viewer's `/monitors:` option
+to select a subset if needed. Without `/multimon`, the viewer and compositor
+use one display as before.
+
+To choose monitors interactively, run:
+
+```sh
+ww-start-viewer --select-monitors
+```
+
+Enter the Windows monitor IDs shown in the list, separated by commas (for
+example `1,2`). The first ID is the primary monitor. Press Enter without
+entering any IDs to cancel. To list IDs without connecting, use
+`ww-start-viewer --list-monitors`. To reuse a selection without a prompt, run
+`ww-start-viewer /multimon /monitors:1,2` (replace `1,2` with your chosen IDs).
+Close the existing viewer before connecting with a different selection.
+
+The SDL viewer's shortcuts use the **right-hand Ctrl and Shift keys**:
+
+- **Right Ctrl + Right Shift + M** minimizes the viewer.
+- **Right Ctrl + Right Shift + G** releases or recaptures keyboard input.
+- **Right Ctrl + Right Shift + Enter** toggles fullscreen.
+- **Right Ctrl + Right Shift + D** disconnects the viewer without stopping
+  the Linux desktop.
+
+If display settings change on Windows while the viewer is open and the Linux
+outputs do not update, close and reopen the viewer to send the initial layout
+again.
+
+This requires the multi-output `dxgdrm` module included in the NixOS build.
+For other distributions, see [Using a different dxgdrm build](distro/README.md#using-a-different-dxgdrm-build).
+
 The viewer lets Windows turn the monitor off and start the screen saver
 (`/sdl-allow-screensaver`). Without that option, SDL keeps the monitor on
 while the viewer runs, even when Windows is locked.
@@ -582,8 +624,8 @@ details.
 - [docs/adr](docs/adr) holds the architecture decision records, one file per
   design decision with its reasons.
 - [CHANGELOG.md](CHANGELOG.md) lists the changes in each release.
-- [distro/README.md](distro/README.md) installs weaselway on Ubuntu, Arch Linux
-  or CachyOS instead of NixOS.
+- [distro/README.md](distro/README.md) installs weaselway on Ubuntu, Debian,
+  Arch Linux or CachyOS instead of NixOS.
 
 ## A note on AI
 

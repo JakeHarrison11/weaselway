@@ -3,7 +3,20 @@ import unittest
 from pathlib import Path
 from unittest.mock import call, patch
 
-from install import DebianTrixie, Desktop, InstallError, Options, Ubuntu
+from install import DebianTrixie, Desktop, InstallError, Options, Ubuntu, download_releases
+
+
+class DxgdrmArchiveTests(unittest.TestCase):
+    def test_local_module_archive_replaces_the_release_download(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            archive = work / "custom.tar.gz"
+            archive.write_bytes(b"custom module archive")
+            options = Options(Desktop.KDE, False, False, 8, False, dxgdrm_archive=archive)
+            with patch("install.BUILD", work), patch("install.step"), patch("install.download") as download:
+                download_releases(options)
+            self.assertEqual((work / "dxgdrm.tar.gz").read_bytes(), archive.read_bytes())
+            self.assertEqual([args[1].name for args, _ in download.call_args_list], ["dxgdrm_drm.h"])
 
 
 class DebianPackagesTests(unittest.TestCase):

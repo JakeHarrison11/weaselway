@@ -173,7 +173,9 @@ in
     ];
   });
 
-  # The userspace half of dxgdrm's virtual display.
+  weaselway-dxgdrm = import ./dxgdrm.nix { pkgs = final; inherit dxgdrm; };
+
+  # The userspace half of dxgdrm's virtual displays.
   weaselwayd = final.stdenv.mkDerivation {
     pname = "weaselwayd";
     version = "0";

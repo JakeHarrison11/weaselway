@@ -1,5 +1,10 @@
 # Weaselway on Ubuntu, Debian, Arch Linux and CachyOS
 
+For an installable Debian 13 amd64 binary bundle and the build command, see
+[Debian WSL binary package](debian/README.md). That bundle is tied to the exact
+WSL kernel it was built for; the source installer below also supports other
+distributions.
+
 This guide installs weaselway into an Ubuntu 26.04, Debian 13 (Trixie), Arch
 Linux or CachyOS WSL distro instead of the NixOS image. You get GNOME, Plasma
 or Hyprland on the virtual display, shown on Windows by the same viewer.
@@ -185,6 +190,24 @@ ww-start-viewer
 puts a shortcut on the Windows desktop that does both. The main README
 describes these commands under [Using it](../README.md#using-it). To stop the
 session, run `ww-start-session stop`.
+
+## Using a different dxgdrm build
+
+The installer defaults to the published single-output dxgdrm release. To use
+native multi-monitor mode, build this branch's module package on a machine
+with Nix, then package the files for the WSL kernel you want to use (replace
+`KERNEL` below with the target distro's `uname -r`):
+
+```sh
+nix build .#dxgdrm-all
+tar -chzf dxgdrm-multi-output.tar.gz -C result \
+    "lib/modules/$KERNEL" lib/udev/rules.d/99-dxgdrm.rules
+```
+
+In the WSL distro, pass the trusted archive to `python3 distro/install.py
+--dxgdrm-archive /path/to/dxgdrm-multi-output.tar.gz` along with your usual
+installer options. Run `wsl --shutdown` from Windows to unload the old
+module, then reopen the distro and use `ww-start-viewer /multimon`.
 
 ## Desktops
 

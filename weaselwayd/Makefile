@@ -15,17 +15,16 @@ CONTROL_CODE := $(addsuffix -protocol.c,$(CONTROL_PROTOCOLS))
 SELECTION := selection.c selection-mutter.c selection-wayland.c wayland-watch.c \
              $(CONTROL_CODE)
 # The compositor's monitor layout, for mapping the pointer.
-SCREENS := screens-wayland.c xdg-output-unstable-v1-protocol.c
+SCREENS := screens-wayland.c xdg-output-unstable-v1-protocol.c monitor-layout.c layout.c
 SOURCES := weaselwayd.c rdp.c input.c audio.c clipboard.c formats.c placeholder.c log.c \
-           layout.c wwdisplay.c \
+           wwdisplay.c \
            $(SELECTION) $(SCREENS)
 # The gfxredir server channel, which distributions build FreeRDP without; see
 # gfxredir/README.md. Upstream code, so it is spared our warnings.
 GFXREDIR := gfxredir/gfxredir_server.c gfxredir/gfxredir_common.c
-HEADERS := rdp.h input.h audio.h clipboard.h selection.h selection-backends.h formats.h \
-           layout.h wwdisplay.h \
-           placeholder.h log.h wayland-watch.h screens-wayland.h \
-           $(CONTROL_HEADERS) xdg-output-unstable-v1-client-protocol.h \
+HEADERS := rdp.h monitor-layout.h input.h audio.h clipboard.h selection.h selection-backends.h \
+           formats.h layout.h wwdisplay.h placeholder.h log.h wayland-watch.h screens-wayland.h \
+           dxgdrm-outputs.h $(CONTROL_HEADERS) xdg-output-unstable-v1-client-protocol.h \
            $(wildcard gfxredir/*.h)
 OBJECTS := $(SOURCES:.c=.o) $(GFXREDIR:.c=.o)
 
@@ -118,6 +117,10 @@ TEST_LIBS := $(shell pkg-config --libs $(TEST_PKGS))
 tests/test-formats: tests/test-formats.c formats.c formats.h
 	$(CC) $(TEST_CFLAGS) -o $@ tests/test-formats.c formats.c $(TEST_LIBS)
 
+tests/test-monitor-layout: tests/test-monitor-layout.c monitor-layout.c monitor-layout.h
+	$(CC) $(TEST_CFLAGS) $(shell pkg-config --cflags freerdp3) -o $@ \
+		tests/test-monitor-layout.c monitor-layout.c $(TEST_LIBS)
+
 # The monitor layout and the Weaselway::Display parser.
 tests/test-layout: tests/test-layout.c layout.c layout.h wwdisplay.c wwdisplay.h
 	$(CC) $(TEST_CFLAGS) -o $@ tests/test-layout.c layout.c wwdisplay.c
@@ -146,15 +149,17 @@ tests/egl-load: tests/egl-load.c tests/xdg-shell-protocol.c tests/xdg-shell-clie
 	$(CC) $(TEST_CFLAGS) -Itests -o $@ tests/egl-load.c tests/xdg-shell-protocol.c \
 		$(shell pkg-config --cflags --libs wayland-client wayland-egl egl glesv2)
 
-check: tests/test-formats tests/test-layout
+check: tests/test-formats tests/test-monitor-layout tests/test-layout
 	tests/test-formats
+	tests/test-monitor-layout
 	tests/test-layout
 
 install: weaselwayd
 	install -D -m 0755 weaselwayd $(DESTDIR)$(PREFIX)/bin/weaselwayd
 
 clean:
-	rm -f weaselwayd weaselwayd-asan $(OBJECTS) $(ASAN_OBJECTS) tests/test-formats tests/test-layout tests/selection-tool \
+	rm -f weaselwayd weaselwayd-asan $(OBJECTS) $(ASAN_OBJECTS) \
+		tests/test-formats tests/test-monitor-layout tests/test-layout tests/selection-tool \
 		tests/rdp-harness tests/egl-load tests/xdg-shell-client-protocol.h tests/xdg-shell-protocol.c \
 		$(CONTROL_HEADERS) $(CONTROL_CODE) \
 		xdg-output-unstable-v1-client-protocol.h xdg-output-unstable-v1-protocol.c

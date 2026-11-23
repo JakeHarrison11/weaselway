@@ -13,6 +13,7 @@
 #include "audio.h"
 #include "clipboard.h"
 #include "input.h"
+#include "monitor-layout.h"
 #include "screens-wayland.h"
 #include "wwdisplay.h"
 
@@ -898,14 +899,6 @@ setup_gfxredir(struct peer_context *peer_ctx)
 /* The client's monitors                                              */
 /* ------------------------------------------------------------------ */
 
-/* MS-RDPBCGR and MS-RDPEDISP both say to ignore a physical size outside
- * 10..10000 mm. */
-static uint32_t
-physical_mm(uint32_t mm)
-{
-    return mm >= 10 && mm <= 10000 ? mm : 0;
-}
-
 static void
 request_layout(struct peer_context *peer_ctx, const struct monitor *monitors, int count)
 {
@@ -937,26 +930,18 @@ static UINT
 disp_monitor_layout(DispServerContext *context, const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU *pdu)
 {
     struct peer_context *peer_ctx = context->custom;
-    int count = (int)MIN(pdu->NumMonitors, (UINT32)RDP_MAX_OUTPUTS);
+    struct monitor monitors[RDP_MAX_OUTPUTS];
+    int count;
 
-    if (count == 0)
+    if (!monitor_layout_parse(pdu, monitors, &count)) {
+        g_warning("ignoring an unsupported monitor layout");
         return CHANNEL_RC_OK;
+    }
 
     g_mutex_lock(&peer_ctx->notes_lock);
     peer_ctx->disp_requested = true;
     peer_ctx->disp_count = count;
-    for (int i = 0; i < count; i++) {
-        const DISPLAY_CONTROL_MONITOR_LAYOUT *m = &pdu->Monitors[i];
-
-        peer_ctx->disp_monitors[i] = (struct monitor){
-            .x = m->Left,
-            .y = m->Top,
-            .width = (int)m->Width,
-            .height = (int)m->Height,
-            .width_mm = physical_mm(m->PhysicalWidth),
-            .height_mm = physical_mm(m->PhysicalHeight),
-        };
-    }
+    memcpy(peer_ctx->disp_monitors, monitors, sizeof(monitors));
     g_mutex_unlock(&peer_ctx->notes_lock);
     wake(peer_ctx->server);
     return CHANNEL_RC_OK;
@@ -991,6 +976,8 @@ request_connect_layout(struct peer_context *peer_ctx)
     rdpSettings *settings = peer_ctx->peer->context->settings;
     UINT32 n = freerdp_settings_get_uint32(settings, FreeRDP_MonitorCount);
     bool attributes = freerdp_settings_get_bool(settings, FreeRDP_HasMonitorAttributes);
+    DISPLAY_CONTROL_MONITOR_LAYOUT descriptors[RDP_MAX_OUTPUTS] = { 0 };
+    DISPLAY_CONTROL_MONITOR_LAYOUT_PDU pdu = { .Monitors = descriptors };
     struct monitor monitors[RDP_MAX_OUTPUTS] = { 0 };
     int count = (int)MIN(n, (UINT32)RDP_MAX_OUTPUTS);
 
@@ -1002,11 +989,20 @@ request_connect_layout(struct peer_context *peer_ctx)
             count = 0;
             break;
         }
-        monitors[i] = (struct monitor){ .x = m->x, .y = m->y, .width = m->width, .height = m->height };
-        if (attributes) {
-            monitors[i].width_mm = physical_mm(m->attributes.physicalWidth);
-            monitors[i].height_mm = physical_mm(m->attributes.physicalHeight);
-        }
+        descriptors[i] = (DISPLAY_CONTROL_MONITOR_LAYOUT){
+            .Flags = m->is_primary ? DISPLAY_CONTROL_MONITOR_PRIMARY : 0,
+            .Left = m->x,
+            .Top = m->y,
+            .Width = (UINT32)m->width,
+            .Height = (UINT32)m->height,
+            .PhysicalWidth = attributes ? m->attributes.physicalWidth : 0,
+            .PhysicalHeight = attributes ? m->attributes.physicalHeight : 0,
+        };
+    }
+    pdu.NumMonitors = (UINT32)count;
+    if (count > 0 && !monitor_layout_parse(&pdu, monitors, &count)) {
+        g_warning("ignoring unsupported initial monitor layout");
+        count = 0;
     }
     if (count == 0) {
         monitors[0].width = (int)freerdp_settings_get_uint32(settings, FreeRDP_DesktopWidth);

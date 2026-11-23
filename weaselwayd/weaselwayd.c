@@ -149,6 +149,12 @@ struct output {
 struct weaselwayd {
     GMainLoop *loop;
     int exit_status;
+    struct monitor layout[RDP_MAX_OUTPUTS];
+    int layout_count;
+    GSubprocess *plasma_alignment;
+    guint plasma_alignment_timer;
+    guint plasma_alignment_timeout;
+    unsigned plasma_alignment_attempts;
 
     int drm_fd;
     struct gbm_device *gbm;
@@ -1134,6 +1140,87 @@ ack_frame(struct output *out)
     out->acked_seq = out->primary_seq;
 }
 
+static gboolean align_plasma(gpointer data);
+
+static void
+cancel_plasma_alignment(struct weaselwayd *p)
+{
+    g_clear_handle_id(&p->plasma_alignment_timer, g_source_remove);
+    g_clear_handle_id(&p->plasma_alignment_timeout, g_source_remove);
+    if (p->plasma_alignment)
+        g_subprocess_force_exit(p->plasma_alignment);
+    g_clear_object(&p->plasma_alignment);
+}
+
+static gboolean
+plasma_alignment_timed_out(gpointer data)
+{
+    struct weaselwayd *p = data;
+
+    p->plasma_alignment_timeout = 0;
+    g_subprocess_force_exit(p->plasma_alignment);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+plasma_alignment_done(GObject *source, GAsyncResult *result, gpointer data)
+{
+    struct weaselwayd *p = data;
+    GSubprocess *process = G_SUBPROCESS(source);
+    g_autoptr(GError) error = NULL;
+    g_autofree char *message = NULL;
+    bool received = g_subprocess_communicate_utf8_finish(process, result, NULL, &message, &error);
+
+    if (process != p->plasma_alignment)
+        return;
+    g_clear_handle_id(&p->plasma_alignment_timeout, g_source_remove);
+    g_clear_object(&p->plasma_alignment);
+
+    if (received && g_subprocess_get_successful(process) && (!message || !*g_strstrip(message))) {
+        g_message("aligned %d Plasma outputs to the viewer layout", p->layout_count);
+    } else if (p->plasma_alignment_attempts < 10) {
+        p->plasma_alignment_timer = g_timeout_add(500, align_plasma, p);
+    } else {
+        g_warning("could not align Plasma outputs: %s", error ? error->message :
+                  (message && *message ? g_strstrip(message) : "kscreen-doctor failed or timed out"));
+    }
+}
+
+static gboolean
+align_plasma(gpointer data)
+{
+    struct weaselwayd *p = data;
+    g_autoptr(GSubprocessLauncher) launcher = NULL;
+    g_autoptr(GError) error = NULL;
+    g_autofree char *doctor = g_find_program_in_path("kscreen-doctor");
+    g_auto(GStrv) args = g_new0(char *, p->layout_count + 2);
+
+    p->plasma_alignment_timer = 0;
+    if (!doctor)
+        return G_SOURCE_REMOVE;
+
+    args[0] = g_steal_pointer(&doctor);
+    for (int i = 0; i < p->layout_count; i++) {
+        const struct monitor *m = &p->layout[i];
+
+        args[i + 1] = g_strdup_printf("output.Virtual-%u.position.%d,%d", i + 1, m->x, m->y);
+    }
+    launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_SILENCE |
+                                         G_SUBPROCESS_FLAGS_STDERR_PIPE);
+    g_subprocess_launcher_setenv(launcher, "QT_QPA_PLATFORM", "wayland", TRUE);
+    g_subprocess_launcher_setenv(launcher, "QT_LOGGING_RULES",
+                                "kscreen.doctor.debug=false;kscreen.doctor.info=false", TRUE);
+    p->plasma_alignment = g_subprocess_launcher_spawnv(launcher, (const char *const *)args, &error);
+    if (!p->plasma_alignment) {
+        g_warning("cannot run kscreen-doctor: %s", error->message);
+        return G_SOURCE_REMOVE;
+    }
+    p->plasma_alignment_attempts++;
+    p->plasma_alignment_timeout = g_timeout_add_seconds(2, plasma_alignment_timed_out, p);
+    g_subprocess_communicate_utf8_async(p->plasma_alignment, NULL, NULL, plasma_alignment_done, p);
+    return G_SOURCE_REMOVE;
+}
+
 /* The client's windows have sizes and places, and their monitors refresh
  * rates; ask for one screen of each. The compositor switches to the new
  * modes, and the frames that follow have those sizes. The outputs past the
@@ -1141,11 +1228,29 @@ ack_frame(struct output *out)
 static void
 apply_layout_request(struct weaselwayd *p)
 {
-    struct monitor monitors[RDP_MAX_OUTPUTS];
+    struct monitor monitors[RDP_MAX_OUTPUTS] = { 0 };
     int count;
+    bool changed;
 
     if (!rdp_server_take_layout_request(p->rdp, monitors, &count))
         return;
+
+    changed = p->layout_count != count;
+    for (int i = 0; i < count; i++) {
+        const struct monitor *old = &p->layout[i], *current = &monitors[i];
+
+        changed |= old->x != current->x || old->y != current->y ||
+                   old->width != current->width || old->height != current->height;
+    }
+    if (changed) {
+        cancel_plasma_alignment(p);
+        if (count > 1) {
+            p->plasma_alignment_attempts = 0;
+            p->plasma_alignment_timer = g_timeout_add(500, align_plasma, p);
+        }
+    }
+    memcpy(p->layout, monitors, sizeof(p->layout));
+    p->layout_count = count;
 
     for (int i = 0; i < DXGDRM_MAX_OUTPUTS; i++) {
         struct drm_dxgdrm_set_mode mode = { .output = (uint32_t)i };
@@ -1562,6 +1667,7 @@ main(int argc, char **argv)
     pump(&p);
 
     g_main_loop_run(p.loop);
+    cancel_plasma_alignment(&p);
 
     for (int i = 0; i < DXGDRM_MAX_OUTPUTS; i++) {
         if (p.outputs[i].readback.active)

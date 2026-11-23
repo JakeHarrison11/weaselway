@@ -1,7 +1,5 @@
 # The weaselway session on NixOS-WSL. Needs the NixOS-WSL module and the
 # overlay from ../flake.nix.
-{ dxgdrm }:
-
 {
   config,
   lib,
@@ -11,9 +9,7 @@
 
 let
   cfg = config.weaselway;
-
-  # dxgdrm.ko for every WSL kernel the dxgdrm flake knows, plus its udev rules.
-  dxgdrm-all = dxgdrm.packages.${pkgs.stdenv.hostPlatform.system}.dxgdrm-all;
+  dxgdrm-all = pkgs.weaselway-dxgdrm;
 
   prep-session = pkgs.writeShellApplication {
     name = "weaselway-prep-session";
@@ -247,6 +243,7 @@ in
         # Serves the compositor's frames, input and audio to the viewer. Waits
         # for a compositor and outlives it, so it runs with the user manager.
         systemd.user.services.weaselwayd = {
+          path = lib.optional config.services.desktopManager.plasma6.enable pkgs.kdePackages.libkscreen;
           description = "Weaselway display server for the Windows viewer";
           documentation = [ "https://github.com/weaselway/weaselway" ];
           wantedBy = [ "default.target" ];
