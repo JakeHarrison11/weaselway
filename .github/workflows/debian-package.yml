@@ -71,13 +71,6 @@ jobs:
           wsl -d "${DISTRO}" -u root -- bash -euxs <<'EOF'
           apt-get update
           apt-get install -y sudo git python3
-          cat > /etc/apt/sources.list.d/trixie-backports.sources <<'SOURCES'
-          Types: deb deb-src
-          URIs: http://deb.debian.org/debian
-          Suites: trixie-backports
-          Components: main
-          Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-          SOURCES
           useradd -m -s /bin/bash -G sudo ci
           echo 'ci ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ci
           cat > /etc/wsl.conf <<'WSL'
