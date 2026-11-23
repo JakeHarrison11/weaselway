@@ -29,9 +29,15 @@ flowchart TD
 
 The compositor runs on its regular KMS (kernel mode setting, the Linux interface for driving
 displays) backend and has no knowledge of Windows. dxgdrm is a kernel module that presents a virtual
-display: one CRTC (the display controller that scans a buffer out), a primary plane with
-`FB_DAMAGE_CLIPS` (the changed rectangles of each frame), a cursor plane with a hotspot, and one
-connector.
+display with four outputs. Each is a CRTC (the display controller that scans a buffer out), a
+primary plane with `FB_DAMAGE_CLIPS` (the changed rectangles of each frame), a cursor plane with a
+hotspot, and a connector. Output 0 is connected from the start; weaselwayd connects the others when
+the viewer has more than one monitor.
+
+Each output is a monitor of the viewer's layout and is kept apart from end to end: its own mode,
+vblank and flip pacing in dxgdrm, its own readback and gfxredir pool (shared-memory file) in
+weaselwayd, and its own window in the viewer. Output `i` is monitor `i` of the layout, gfxredir
+window `i` and pool `i + 1` ([0037](docs/adr/0037-one-gfxredir-window-per-output.md)).
 
 The scanout buffers are D3D12 textures. weaselwayd waits for a commit on the dxgdrm node and imports
 the buffer into its own GL context (mesa d3d12). It reads the damaged region back into a pixel
@@ -41,15 +47,26 @@ gfxredir buffer (the frame format of WSLg's RDP extension) in the shared memory 
 client maps. The client opens that memory as a Direct3D 12 heap and copies the damaged rectangles
 on the GPU into the texture it draws. Layouts it cannot open that way go through a CPU copy.
 
-weaselwayd acknowledges a frame to dxgdrm before it issues the readback, unless the previous
-readback is still running or the client holds every buffer. dxgdrm withholds the compositor's
+weaselwayd acknowledges a frame to dxgdrm before it issues the readback, unless the output's
+previous readback is still running or the client holds every buffer of its pool. dxgdrm withholds the compositor's
 page-flip event until then, and completes it on its next virtual vblank. A slow client therefore
 slows the compositor down, and frames do not queue up.
 
 The client's keyboard, mouse and touchpad become uinput devices (input devices created from user
-space), which libinput handles like any others. The size of the session follows the viewer's window:
-weaselwayd sets the mode on dxgdrm, and the compositor sees a hotplug event. The viewer has its own
-channel, `Weaselway::Display`, on which it reports two things about the monitor the window is on:
+space), which libinput handles like any others. The viewer sends sizes, positions and mouse events
+in physical pixels, whatever scale Windows uses. A pointer position is a point in the client's
+desktop. weaselwayd finds the output it is on and moves the uinput pointer, whose absolute axes
+span all outputs, to the same spot on that output.
+
+The compositor maps those axes onto its logical layout (where it placed the outputs, in units that
+already include each output's scale). weaselwayd reads that layout as a Wayland client with
+`xdg-output`, which mutter, KWin and the wlroots compositors offer. The output named `Virtual-N` is
+dxgdrm output N-1. Until the compositor has reported every output, weaselwayd places them at the
+viewer's positions with the size of their mode.
+
+The size of each screen follows its viewer window: weaselwayd sets the output's mode on dxgdrm,
+and the compositor sees a hotplug event. The viewer has its own channel, `Weaselway::Display`, on
+which it reports two things about the monitor each window is on:
 
 - its refresh rate, which weaselwayd uses as the mode's rate
   ([0029](docs/adr/0029-refresh-rate-from-the-viewer.md));
@@ -60,9 +77,8 @@ While no compositor owns the display, the client gets a screen with "No composit
 the compositor has the display off, it gets "Screen is off"
 ([0026](docs/adr/0026-placeholder-without-a-compositor.md)).
 
-The clipboard is the only feature that needs the compositor's cooperation, and there is no protocol
-for it that every compositor implements. weaselwayd runs two backends and uses the one that finds
-its compositor:
+The clipboard needs the compositor's cooperation, and there is no protocol for it that every
+compositor implements. weaselwayd runs two backends and uses the one that finds its compositor:
 
 - With mutter, it uses the D-Bus interface that gnome-remote-desktop uses
   (`org.gnome.Mutter.RemoteDesktop`). It creates a session object with the clipboard enabled and
@@ -70,7 +86,9 @@ its compositor:
 - With KWin and the wlroots compositors, it is a Wayland client with `ext-data-control-v1`
   or the older `wlr-data-control` protocol (used by KWin 6.3). It
   watches `$XDG_RUNTIME_DIR` for `wayland-*` sockets and connects to the first compositor that
-  offers the protocol. mutter does not offer it and is left alone.
+  offers the protocol. mutter does not offer it and is left alone. The layout for the pointer is
+  read over a second connection, found the same way (`wayland-watch.c`), because it also needs
+  mutter.
 
 Text, HTML and images are converted between Windows clipboard formats and MIME types.
 
@@ -87,7 +105,7 @@ The NixOS image takes everything from the flake.
 | mesa with the d3d12 changes | `weaselway/mesa`, branch `mesa-26.2.7-wsl` | user distro (`/run/opengl-driver`) |
 | dxgdrm kernel module | `weaselway/dxgdrm` flake | user distro kernel, loaded from the store |
 | weaselwayd | [weaselwayd/](weaselwayd) in this repo | user distro, as a unit of the user manager |
-| mutter | nixpkgs, plus [one patch](nix/mutter-stage-relayout.patch) | user distro (gnome-shell links it) |
+| mutter | nixpkgs, plus three patches (`nix/mutter-*.patch`) | user distro (gnome-shell links it) |
 | KWin (optional) | nixpkgs, plus a damage patch per release | user distro |
 | aquamarine, Hyprland (optional) | nixpkgs, plus one patch each | user distro |
 | Windows viewer `sdl-freerdp.exe` | `weaselway/freerdp` flake, `packages.sdl-freerdp` | Windows, started from the store through interop |
@@ -131,7 +149,10 @@ A compositor needs no patch to run on the virtual display. The patches the image
 problems that show up there but are unrelated to RDP:
 
 - mutter: the overview keeps its old size when the stage is resized, which happens whenever the
-  viewer's window is resized. The fix is the single commit on `main` of `weaselway/mutter`.
+  viewer's window is resized. A failed device open closed fd 0, which hung GNOME when WSL's vgem
+  came back through udev. With several monitors, every view but the last had a viewport past its
+  framebuffer, which Intel Gen9's D3D12 driver draws squeezed, leaving trails. The fixes are the
+  three commits on `main` of `weaselway/mutter`.
 - KWin: it told the kernel that the whole buffer changed, so every frame was read back in full. The
   patch sets `FB_DAMAGE_CLIPS`. It is on `master` of `weaselway/kde-kwin`, with backports on
   `weaselway-6.6.6` and `weaselway-6.7.5`. The overlay picks the patch for KWin 6.6, 6.7 or 6.8
@@ -147,8 +168,8 @@ problems that show up there but are unrelated to RDP:
 - **weaselway** (this repository): the flake, the NixOS modules, the overlay, the image
   configuration, weaselwayd, the shell scripts and the install script for other distros.
 - **mesa**: the image builds the branch `mesa-26.2.7-wsl` with nixpkgs' Mesa package definition.
-  `mesa-26.3.0-wsl` and `main` carry the same commits on top of the 26.3.0 tag and upstream main.
-  The image builds `mesa-26.3.0-wsl` while nixpkgs' Mesa is 26.3 (nixos-unstable now), and `main`
+  `mesa-26.3.1-wsl` and `main` carry the same commits on top of the 26.3.1 tag and upstream main.
+  The image builds `mesa-26.3.1-wsl` while nixpkgs' Mesa is 26.3 (nixos-unstable now), and `main`
   once it is 27 or newer, because nixpkgs' package only builds the Mesa major it targets. The
   commits change d3d12 and dzn (Mesa's Vulkan driver on D3D12):
   - scanout buffers on the dxgdrm KMS node, with a GEM handle (the kernel's buffer handle) and a
@@ -175,7 +196,9 @@ problems that show up there but are unrelated to RDP:
   SDL3 client:
   - a Direct3D 11 presenter on a render thread, which copies gfxredir buffers on the GPU through a
     Direct3D 12 heap on the shared memory (`-sdl-zero-copy` turns that off);
-  - the `wwdisplay` channel, which reports the monitor's refresh rate and the vblank timing;
+  - the `wwdisplay` channel, which reports each monitor's refresh rate and vblank timing;
+  - gfxredir with several pools, each window drawn from its own, and `/sdl-windows:<n>`, which
+    shows the desktop as n monitors in n windows;
   - touchpad gestures, Alt+F4 sent to the session, and the signed 16-bit PCM fix.
 - **mutter**: `main` is upstream main plus the relayout fix, kept in a form that can be submitted
   upstream. The image does not build the fork. It applies the same commit to nixpkgs' mutter as a
@@ -221,9 +244,9 @@ affect ([0015](docs/adr/0015-forks-fetched-with-git.md)).
   and libgbm (which load the patched mesa at run time), `weaselway-freerdp`, and the uapi header from
   the dxgdrm input. The gfxredir server channel is compiled in from
   [weaselwayd/gfxredir](weaselwayd/gfxredir), because distributions build FreeRDP without it.
-  weaselwayd is a GLib program with one main loop. It uses GIO for D-Bus and sockets, libcrypto for
-  its certificate, libpng for images on the clipboard, and libwayland-client for the clipboard of
-  compositors other than mutter. The build runs `make check`.
+  weaselwayd is a GLib program with one main loop. It uses GIO for D-Bus and sockets, libpng for
+  images on the clipboard, and libwayland-client for the clipboard of compositors other than
+  mutter. The build runs `make check`.
 - `weaselway-freerdp`: nixpkgs' freerdp plus
   [nix/freerdp-dsp-ffmpeg-pcm-s16.patch](nix/freerdp-dsp-ffmpeg-pcm-s16.patch). Only weaselwayd
   links it.
@@ -402,6 +425,10 @@ on a WSL installation. This section records those failures. The module's options
   `SDL3.dll` and `SDL3_ttf.dll` from the same directory. The script passes
   `/sdl-allow-screensaver`. Without it, SDL holds a display power request, and Windows keeps the
   monitor on while the viewer runs, even when Windows is locked.
+- `weaselway.viewer.copyTo` sets `WEASELWAY_VIEWER_COPY_TO` in the session variables.
+  `ww-start-viewer` then copies the directory of `WEASELWAY_VIEWER` to a subdirectory named after
+  its store hash, and runs the copy. It copies into a temporary directory and renames it, so a
+  cut-short copy is never used, and it never replaces a directory that exists.
 
 ### WSL integration
 
@@ -544,7 +571,7 @@ cd /tmp && sudo /nix/store/<hash>-nixos-wsl-tarball-builder/bin/nixos-wsl-tarbal
 ### Building weaselwayd alone
 
 Run `make` in [weaselwayd/](weaselwayd). It needs `DXGDRM_INCLUDE` set to a dxgdrm checkout, and
-FreeRDP 3, GLib, libcrypto, libpng, EGL, GLES, gbm, libdrm, wayland-client and wayland-protocols
+FreeRDP 3, GLib, libpng, EGL, GLES, gbm, libdrm, wayland-client and wayland-protocols
 from pkg-config, and `wayland-scanner`. `nix develop` provides all of these.
 
 - `make check` tests the format conversions of the clipboard.
@@ -694,10 +721,12 @@ These decisions and fixes are easy to undo by accident.
 
 - **No codec fallback.** The client either supports gfxredir or is disconnected, with the reason in
   weaselwayd's log.
-- **The certificate is generated in memory.** `winpr-makecert` is not on `PATH` on NixOS, so
-  weaselwayd creates a self-signed RSA-2048 certificate with libcrypto. The certificate cannot be
-  omitted: FreeRDP's server refuses to initialise a peer without one, even with standard RDP
-  security.
+- **The connection is not encrypted.** weaselwayd offers only standard RDP security (the
+  protocol's mode without TLS), and marks every client as local, so FreeRDP turns encryption off.
+  FreeRDP's server still refuses to initialise a peer without an RSA-2048 certificate, so
+  `rdp.c` contains a fixed self-signed one whose private key was thrown away. Nothing encrypts
+  with it. The thread-safe channel writes (see below) rely on this: legacy RDP encryption keeps
+  RC4 state that two threads must not share.
 - **Access to the channel manager is serialised.** weaselwayd's playback thread and its main loop
   both drain FreeRDP's virtual channel manager, and a lock keeps them apart.
 - **Alt+F4 goes to the session.** On Windows, SDL turns Alt+F4 into a close request for the viewer's
@@ -717,7 +746,7 @@ The limitations that affect users are listed in the
 when working on the code.
 
 - Two features of the RDP backend that mutter used to carry have not been ported: the client's
-  scale factor, and the error frame (a client is disconnected instead, with the reason in the log).
+  scale factor (the viewer sends one per monitor, and weaselwayd ignores it), and the error frame (a client is disconnected instead, with the reason in the log).
   There is no touchscreen device, only the touchpad.
 - The clipboard does not carry files, and needs mutter or a compositor with `ext-data-control-v1`
   or `wlr-data-control`.
